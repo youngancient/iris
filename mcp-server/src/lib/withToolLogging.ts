@@ -1,46 +1,79 @@
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
-import { supabase } from "../supabase.js";
+import type { ToolContext } from "../context.js";
+import type { ToolCallInsert } from "../db/types.js";
+import { maskDeep } from "./mask.js";
 
-export type ToolOutcome = {
-  status: "success" | "not_found" | "error";
-  data: Record<string, unknown>;
+export type ToolOutcome =
+  | { status: "success" | "not_found"; data: Record<string, unknown>; idempotencyKey?: string }
+  /** Expected failure with a message for the agent (e.g. a missing field). */
+  | { status: "invalid"; message: string };
+
+type Options = {
+  name: string;
+  purpose: string;
+  /** What the agent is told if the database or an unexpected error stops the tool. */
+  failureMessage: string;
 };
 
 /**
- * Wraps a tool handler so every call writes a tool_calls row, and failures
- * come back as structured errors instead of crashing the server.
+ * Every tool call writes a tool_calls row (masked input and result, status,
+ * duration). Failures come back through MCP's isError channel with a plain
+ * message; the internal error is logged, never returned.
  */
-export function withToolLogging<I extends { conversation_id?: string }>(
-  toolName: string,
-  purpose: string,
+export function withToolLogging<I extends Record<string, unknown>>(
+  ctx: ToolContext,
+  { name, purpose, failureMessage }: Options,
   handler: (input: I) => Promise<ToolOutcome>,
 ) {
   return async (input: I): Promise<CallToolResult> => {
-    let outcome: ToolOutcome;
-    let errorMessage: string | null = null;
+    const started = Date.now();
+    let outcome: ToolOutcome | null = null;
+    let internalError: string | null = null;
 
     try {
       outcome = await handler(input);
     } catch (err) {
-      errorMessage = err instanceof Error ? err.message : String(err);
-      outcome = { status: "error", data: { error: "Tool failed. The failure has been logged." } };
+      internalError = err instanceof Error ? err.message : String(err);
     }
 
-    const { error: logError } = await supabase.from("tool_calls").insert({
-      conversation_id: input.conversation_id ?? null,
-      tool_name: toolName,
+    const row: ToolCallInsert = {
+      conversation_id: ctx.conversationId,
+      turn_index: ctx.turnIndex,
+      tool_name: name,
       purpose,
-      input_summary: input,
-      result_summary: outcome.data,
-      status: outcome.status,
-      error_message: errorMessage,
-    });
-    if (logError) console.error(`[${toolName}] failed to log tool call:`, logError.message);
+      input_summary: maskDeep(input),
+      result_summary:
+        outcome && outcome.status !== "invalid" ? maskDeep(outcome.data) : { error: outcome?.message ?? failureMessage },
+      status: outcome && outcome.status !== "invalid" ? outcome.status : "error",
+      error_message: internalError ?? (outcome?.status === "invalid" ? outcome.message : null),
+      duration_ms: Date.now() - started,
+      idempotency_key: outcome && outcome.status !== "invalid" ? (outcome.idempotencyKey ?? null) : null,
+    };
+    await logToolCall(ctx, row);
 
+    if (!outcome) return errorResult(failureMessage);
+    if (outcome.status === "invalid") return errorResult(outcome.message);
     return {
       content: [{ type: "text", text: JSON.stringify(outcome.data) }],
       structuredContent: outcome.data,
-      isError: outcome.status === "error",
     };
   };
+}
+
+function errorResult(message: string): CallToolResult {
+  return { content: [{ type: "text", text: message }], isError: true };
+}
+
+// One retry, then a structured stderr line (stdout is the MCP channel in stdio mode).
+async function logToolCall(ctx: ToolContext, row: ToolCallInsert) {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      await ctx.db.insertToolCall(row);
+      return;
+    } catch (err) {
+      if (attempt === 1) {
+        console.error(JSON.stringify({ level: "error", msg: "tool_calls insert failed", err: String(err), row }));
+      }
+    }
+  }
 }

@@ -39,3 +39,8 @@ create table payouts (
 
 create index on customers (lower(contact_email));
 create index on customers (lower(company_name));
+
+-- Server-only access: RLS on with no policies (see 002 for the full note).
+alter table customers    enable row level security;
+alter table transactions enable row level security;
+alter table payouts      enable row level security;

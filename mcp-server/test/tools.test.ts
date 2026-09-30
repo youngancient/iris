@@ -1,0 +1,271 @@
+import { describe, expect, it } from "vitest";
+import { connect, customers, seededDb, transactions } from "./helpers.js";
+
+const AMARA = { company_name: "LagosLedger", email: "amara@lagosledger.example" };
+
+describe("lookup_customer identity rules (design §5.2)", () => {
+  it("company name alone: found, but account fields stay empty and the caller is not identified", async () => {
+    const db = seededDb();
+    const { call } = await connect(db);
+    const { data } = await call("lookup_customer", { company_name: "LagosLedger" });
+    expect(data).toMatchObject({ found: true, customer_id: "CUS-1001", company_name: "LagosLedger", plan: "", support_notes: "" });
+    expect(await db.identifiedCustomer("conv-1")).toBeNull();
+  });
+
+  it("company + email: identified, full details returned", async () => {
+    const db = seededDb();
+    const { call } = await connect(db);
+    const { data } = await call("lookup_customer", AMARA);
+    expect(data).toMatchObject({ found: true, plan: "Growth", account_status: "active", kyc_status: "approved" });
+    expect(await db.identifiedCustomer("conv-1")).toBe("CUS-1001");
+  });
+
+  it("customer ID + email identifies too", async () => {
+    const db = seededDb();
+    const { call } = await connect(db);
+    await call("lookup_customer", { customer_id: "CUS-1001", email: "amara@lagosledger.example" });
+    expect(await db.identifiedCustomer("conv-1")).toBe("CUS-1001");
+  });
+
+  it("customer ID + company (no email) is not enough", async () => {
+    const db = seededDb();
+    const { call } = await connect(db);
+    const { data } = await call("lookup_customer", { customer_id: "CUS-1001", company_name: "LagosLedger" });
+    expect(data.plan).toBe("");
+    expect(await db.identifiedCustomer("conv-1")).toBeNull();
+  });
+
+  it("right company, wrong email: not found, and reveals nothing", async () => {
+    const { call } = await connect(seededDb());
+    const { data } = await call("lookup_customer", { company_name: "LagosLedger", email: "someone@else.example" });
+    expect(data).toEqual({ found: false, customer_id: "", company_name: "", plan: "", account_status: "", kyc_status: "", support_notes: "" });
+  });
+
+  it("returns support_notes exactly as stored, for every seed customer", async () => {
+    for (const c of customers) {
+      const { call } = await connect(seededDb());
+      const { data } = await call("lookup_customer", { company_name: c.company_name, email: c.contact_email });
+      expect(data.support_notes).toBe(c.support_notes);
+    }
+  });
+
+  it("accepts messy spoken input", async () => {
+    const db = seededDb();
+    const { call } = await connect(db);
+    const { data } = await call("lookup_customer", { company_name: "lagos ledger", email: " Amara@LagosLedger.example " });
+    expect(data.found).toBe(true);
+    expect(await db.identifiedCustomer("conv-1")).toBe("CUS-1001");
+  });
+
+  it("no identifiers at all is an error, not a crash", async () => {
+    const { call } = await connect(seededDb());
+    const result = await call("lookup_customer", {});
+    expect(result.isError).toBe(true);
+    expect(result.text).toMatch(/at least one/);
+  });
+});
+
+describe("lookup_transaction ownership (design §5.2)", () => {
+  it("unidentified caller: status and summary, but no amount or customer_id", async () => {
+    const { call } = await connect(seededDb());
+    const { data } = await call("lookup_transaction", { transaction_id: "TXN-9001" });
+    expect(data).toMatchObject({
+      found: true, status: "processing", type: "outgoing payout", amount: "", customer_id: "",
+      estimated_arrival: "2026-08-19", support_summary: transactions[0].support_summary,
+    });
+  });
+
+  it("identified owner: everything", async () => {
+    const { call } = await connect(seededDb());
+    await call("lookup_customer", AMARA);
+    const { data } = await call("lookup_transaction", { transaction_id: "TXN-9001" });
+    expect(data).toMatchObject({ amount: "2400", customer_id: "CUS-1001", currency: "USD" });
+  });
+
+  it("identified as a different customer: not found (doesn't reveal the record exists)", async () => {
+    const { call } = await connect(seededDb());
+    await call("lookup_customer", AMARA);
+    const { data } = await call("lookup_transaction", { transaction_id: "TXN-9003" });
+    expect(data.found).toBe(false);
+  });
+
+  it("normalises spoken references", async () => {
+    const { call } = await connect(seededDb());
+    for (const ref of ["txn 9001", "T X N nine zero zero one", "TXN.9001", "9001"]) {
+      expect((await call("lookup_transaction", { transaction_id: ref })).data.transaction_id).toBe("TXN-9001");
+    }
+  });
+
+  it("returns empty estimated_arrival rather than inventing one", async () => {
+    const { call } = await connect(seededDb());
+    expect((await call("lookup_transaction", { transaction_id: "TXN-9003" })).data.estimated_arrival).toBe("");
+  });
+});
+
+describe("lookup_payout", () => {
+  it("PAY-7002 needs review, with the linked transaction's summary", async () => {
+    const { call } = await connect(seededDb());
+    const { data } = await call("lookup_payout", { payout_id: "PAY-7002" });
+    expect(data).toMatchObject({
+      found: true, status: "review required", failure_reason: "compliance review",
+      support_summary: "Transaction requires compliance review. Escalate account-specific questions.",
+    });
+  });
+
+  it("finds a payout by its transaction", async () => {
+    const { call } = await connect(seededDb());
+    expect((await call("lookup_payout", { transaction_id: "TXN-9004" })).data.payout_id).toBe("PAY-7003");
+  });
+
+  it("payout and transaction that don't belong together: not found", async () => {
+    const { call } = await connect(seededDb());
+    expect((await call("lookup_payout", { payout_id: "PAY-7001", transaction_id: "TXN-9004" })).data.found).toBe(false);
+  });
+
+  it("neither reference: error", async () => {
+    const { call } = await connect(seededDb());
+    expect((await call("lookup_payout", {})).isError).toBe(true);
+  });
+});
+
+describe("create_support_ticket", () => {
+  const ticket = { category: "payment", priority: "high", summary: "TXN-9001 hasn't arrived", conversation_id: "conv-1" };
+
+  it("creates a ticket and links a transaction mentioned in the summary", async () => {
+    const db = seededDb();
+    const { call } = await connect(db);
+    const { data } = await call("create_support_ticket", ticket);
+    expect(data.status).toBe("open");
+    expect(db.tickets[0]).toMatchObject({ transaction_id: "TXN-9001", priority: "high", category: "payment" });
+  });
+
+  it("doesn't link a reference that doesn't exist, but still creates the ticket", async () => {
+    const db = seededDb();
+    const { call } = await connect(db);
+    await call("create_support_ticket", { ...ticket, summary: "Invoice payment TXN-4242 failed" });
+    expect(db.tickets[0].transaction_id).toBeNull();
+  });
+
+  it("a retry returns the same ticket", async () => {
+    const db = seededDb();
+    const { call } = await connect(db);
+    const first = await call("create_support_ticket", ticket);
+    const second = await call("create_support_ticket", { ...ticket, summary: "Customer says TXN-9001 is late" });
+    expect(second.data.ticket_id).toBe(first.data.ticket_id);
+    expect(db.tickets).toHaveLength(1);
+  });
+
+  it("a reworded retry without a reference returns the same ticket", async () => {
+    const db = seededDb();
+    const { call } = await connect(db);
+    const first = await call("create_support_ticket", { ...ticket, summary: "Payment stuck" });
+    const second = await call("create_support_ticket", { ...ticket, summary: "The payment is stuck" });
+    expect(second.data.ticket_id).toBe(first.data.ticket_id);
+  });
+
+  it("only the identified customer is attached; a model-supplied customer_id is not trusted", async () => {
+    const db = seededDb();
+    const { call } = await connect(db);
+    await call("create_support_ticket", { ...ticket, customer_id: "CUS-1003" });
+    expect(db.tickets[0].customer_id).toBeNull();
+    expect(db.tickets[0].summary).toMatch(/not verified/);
+  });
+
+  it("maps unknown category and priority to safe values", async () => {
+    const db = seededDb();
+    const { call } = await connect(db);
+    await call("create_support_ticket", { ...ticket, category: "something odd", priority: "asap!!" });
+    expect(db.tickets[0]).toMatchObject({ category: "other", priority: "medium" });
+  });
+
+  it("uses the header conversation ID, and logs a mismatch", async () => {
+    const db = seededDb();
+    const { call } = await connect(db, "conv-real");
+    await call("create_support_ticket", { ...ticket, conversation_id: "conv-forged" });
+    expect(db.tickets[0].conversation_id).toBe("conv-real");
+    expect(db.events.map((e) => e.event_type)).toContain("conversation_id_mismatch");
+  });
+});
+
+describe("create_escalation", () => {
+  const escalation = { user_name: "Efua Mensah", user_email: "efua@accrastack.example", category: "compliance", reason: "Account restricted" };
+
+  it("creates an escalation, writes its own event, and gives a no-promise follow-up", async () => {
+    const db = seededDb();
+    const { call } = await connect(db);
+    const { data } = await call("create_escalation", { ...escalation, preferred_time: "tomorrow morning" });
+    expect(data.follow_up_summary).toBe("A RelayPay specialist will contact you at the email you provided, around tomorrow morning.");
+    expect(db.escalations[0]).toMatchObject({ call_booked: true, category: "compliance" });
+    expect(db.events.map((e) => e.event_type)).toEqual(["escalation_created"]);
+  });
+
+  it("asking twice returns the same escalation", async () => {
+    const db = seededDb();
+    const { call } = await connect(db);
+    const first = await call("create_escalation", escalation);
+    const second = await call("create_escalation", { ...escalation, reason: "Still restricted" });
+    expect(second.data.escalation_id).toBe(first.data.escalation_id);
+    expect(db.escalations).toHaveLength(1);
+    expect(db.events).toHaveLength(1);
+  });
+
+  it("a missing field is an error that names it", async () => {
+    const { call } = await connect(seededDb());
+    const result = await call("create_escalation", { ...escalation, user_name: " " });
+    expect(result.isError).toBe(true);
+    expect(result.text).toMatch(/user_name/);
+  });
+
+  it("rejects a malformed email", async () => {
+    const { call } = await connect(seededDb());
+    expect((await call("create_escalation", { ...escalation, user_email: "efua at accrastack" })).isError).toBe(true);
+  });
+
+  it("maps free-text categories onto the database's allowed values", async () => {
+    const db = seededDb();
+    const { call } = await connect(db);
+    await call("create_escalation", { ...escalation, category: "Refund request" });
+    expect(db.escalations[0].category).toBe("dispute");
+  });
+});
+
+describe("log_conversation_event", () => {
+  it("logs any event type", async () => {
+    const db = seededDb();
+    const { call } = await connect(db);
+    const { data } = await call("log_conversation_event", {
+      conversation_id: "conv-1", event_type: "Clarification Requested", summary: "Asked which payment", metadata: { a: 1 },
+    });
+    expect(data).toEqual({ logged: true });
+    expect(db.events[0]).toMatchObject({ event_type: "clarification_requested", metadata: { a: 1 } });
+  });
+});
+
+describe("logging and failures", () => {
+  it("every call writes a tool_calls row with emails masked", async () => {
+    const db = seededDb();
+    const { call } = await connect(db);
+    await call("lookup_customer", AMARA);
+    expect(db.toolCalls).toHaveLength(1);
+    expect(db.toolCalls[0]).toMatchObject({ tool_name: "lookup_customer", status: "success", conversation_id: "conv-1" });
+    expect(JSON.stringify(db.toolCalls[0].input_summary)).toContain("a***@lagosledger.example");
+    expect(JSON.stringify(db.toolCalls[0])).not.toContain("amara@");
+  });
+
+  it("not found is logged as not_found, not error", async () => {
+    const db = seededDb();
+    const { call } = await connect(db);
+    await call("lookup_transaction", { transaction_id: "TXN-0000" });
+    expect(db.toolCalls[0].status).toBe("not_found");
+  });
+
+  it("database down: isError with a plain message, internal error kept out of the reply", async () => {
+    const db = seededDb();
+    const { call } = await connect(db);
+    db.failing = true;
+    const result = await call("lookup_transaction", { transaction_id: "TXN-9001" });
+    expect(result.isError).toBe(true);
+    expect(result.text).toBe("Transaction lookup is temporarily unavailable. Please try again shortly.");
+    expect(result.text).not.toMatch(/database/);
+  });
+});
