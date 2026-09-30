@@ -51,10 +51,12 @@ export function register(server: McpServer, ctx: ToolContext) {
         }
 
         // Every identifier given must point at the same single customer (design §5.2).
-        const candidateSets: CustomerRow[][] = [];
-        if (customerId) candidateSets.push(await ctx.db.customerById(customerId).then((c) => (c ? [c] : [])));
-        if (email) candidateSets.push(await ctx.db.customersByEmail(email));
-        if (company) candidateSets.push(await ctx.db.customersByCompany(company));
+        // One read per identifier given, all at once.
+        const candidateSets: CustomerRow[][] = await Promise.all([
+          ...(customerId ? [ctx.db.customerById(customerId).then((c) => (c ? [c] : []))] : []),
+          ...(email ? [ctx.db.customersByEmail(email)] : []),
+          ...(company ? [ctx.db.customersByCompany(company)] : []),
+        ]);
 
         const ids = candidateSets.map((set) => set.map((c) => c.customer_id));
         const shared = ids.reduce((acc, set) => acc.filter((id) => set.includes(id)));

@@ -54,9 +54,12 @@ export function register(server: McpServer, ctx: ToolContext) {
         const category = normalizeEscalationCategory(input.category);
         const preferredTime = present(input.preferred_time);
         // Same trust rule as tickets: only the identified customer is linked.
-        const customerId = conversationId ? await ctx.db.identifiedCustomer(conversationId) : null;
         const ticketRef = present(input.ticket_id)?.toUpperCase();
-        const ticketId = ticketRef && (await ctx.db.ticketExists(ticketRef)) ? ticketRef : null;
+        const [customerId, ticketFound] = await Promise.all([
+          conversationId ? ctx.db.identifiedCustomer(conversationId) : Promise.resolve(null),
+          ticketRef ? ctx.db.ticketExists(ticketRef) : Promise.resolve(false),
+        ]);
+        const ticketId = ticketRef && ticketFound ? ticketRef : null;
 
         const escalation = await ctx.db.insertEscalation({
           conversation_id: conversationId,

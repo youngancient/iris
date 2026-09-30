@@ -4,7 +4,7 @@ import type { ToolContext } from "../context.js";
 import type { PayoutRow } from "../db/types.js";
 import { normalizeRef, present } from "../lib/normalize.js";
 import { withToolLogging } from "../lib/withToolLogging.js";
-import { accessFor } from "./ownership.js";
+import { accessFrom, identifiedFor } from "./ownership.js";
 
 const description =
   "Use this tool when the user asks about a contractor payout or payout schedule. Provide payout_id (e.g. PAY-7002) " +
@@ -50,6 +50,9 @@ export function register(server: McpServer, ctx: ToolContext) {
           return { status: "invalid", message: "Provide a payout_id (for example PAY-7002) or a transaction_id." };
         }
 
+        const identifiedPromise = identifiedFor(ctx);
+        // Awaited below, but not on the not-found path: never leave its rejection unhandled.
+        identifiedPromise.catch(() => {});
         let payout: PayoutRow | null = payoutId
           ? await ctx.db.payoutById(payoutId)
           : await ctx.db.payoutByTransactionId(transactionId as string);
@@ -57,11 +60,13 @@ export function register(server: McpServer, ctx: ToolContext) {
         if (payout && payoutId && transactionId && payout.transaction_id !== transactionId) payout = null;
         if (!payout) return { status: "not_found", data: notFound };
 
-        if ((await accessFor(ctx, payout.customer_id)) === "other_customer") {
+        const [identified, linked] = await Promise.all([
+          identifiedPromise,
+          payout.transaction_id ? ctx.db.transactionById(payout.transaction_id) : Promise.resolve(null),
+        ]);
+        if (accessFrom(identified, payout.customer_id) === "other_customer") {
           return { status: "not_found", data: notFound };
         }
-
-        const linked = payout.transaction_id ? await ctx.db.transactionById(payout.transaction_id) : null;
         const status = payout.status ?? "";
         return {
           status: "success",

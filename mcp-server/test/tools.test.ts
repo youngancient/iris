@@ -307,7 +307,7 @@ describe("logging and failures", () => {
       arguments: { category: "payment", priority: "high", summary: "TXN-9001 late", conversation_id: "conv-1" },
     });
     expect(result.isError).toBe(true);
-    expect((result.content as { text: string }[])[0].text).toMatch(/safe to call it again/);
+    expect((result.content as { text: string }[])[0].text).toMatch(/Calling this tool again with the same details is harmless/);
     await new Promise((r) => setTimeout(r, 150));
     expect(db.tickets).toHaveLength(1);
     expect(db.toolCalls[0]).toMatchObject({ status: "success" });

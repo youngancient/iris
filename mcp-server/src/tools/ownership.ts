@@ -8,8 +8,12 @@ export type Access = "owner" | "anonymous" | "other_customer";
  * - anonymous: not identified → status and summary, no amount or customer_id
  * - other_customer: identified as someone else → treated as not found
  */
-export async function accessFor(ctx: ToolContext, recordCustomerId: string | null): Promise<Access> {
-  const identified = ctx.conversationId ? await ctx.db.identifiedCustomer(ctx.conversationId) : null;
+export function accessFrom(identified: string | null, recordCustomerId: string | null): Access {
   if (!identified) return "anonymous";
   return identified === recordCustomerId ? "owner" : "other_customer";
+}
+
+/** Who this call is identified as. Start it alongside the record read, not after it. */
+export function identifiedFor(ctx: ToolContext): Promise<string | null> {
+  return ctx.conversationId ? ctx.db.identifiedCustomer(ctx.conversationId) : Promise.resolve(null);
 }

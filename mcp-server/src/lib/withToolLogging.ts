@@ -66,7 +66,7 @@ export function withToolLogging<I extends Record<string, unknown>>(
           .catch((lateErr) => logToolCall(ctx, buildRow(null, String(lateErr), "failed after the deadline")));
         return errorResult(
           retrySafe
-            ? `${failureMessage} It took too long and may or may not have been saved. It is safe to call it again with the same details: it returns the existing record instead of creating a duplicate.`
+            ? `${failureMessage} Instruction for the agent, not for the caller: the tool timed out, so the record may or may not exist. Calling this tool again with the same details is harmless, because it returns the existing record instead of a duplicate.`
             : failureMessage,
         );
       }

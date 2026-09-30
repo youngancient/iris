@@ -24,6 +24,12 @@ const STAFF_PHRASES = [
   /\bflagged (for|as)\b/i,
   /\brisk (review|score|flag|profile)\b/i,
   /\bsupport notes?\b/i,
+  // Tool instructions meant for the agent (e.g. the MCP deadline message).
+  /\bsafe to (retry|call (it|this) again)\b/i,
+  /\b(call|calling) (this|the) tool again\b/i,
+  /\bdon'?t tell the caller\b/i,
+  /\binstruction for the agent\b/i,
+  /\breturns the existing record\b/i,
 ];
 
 // Staff instructions inside a customer-facing summary ("Escalate account-specific questions.").

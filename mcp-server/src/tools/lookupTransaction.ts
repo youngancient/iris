@@ -3,7 +3,7 @@ import { z } from "zod";
 import type { ToolContext } from "../context.js";
 import { normalizeRef, present } from "../lib/normalize.js";
 import { withToolLogging } from "../lib/withToolLogging.js";
-import { accessFor } from "./ownership.js";
+import { accessFrom, identifiedFor } from "./ownership.js";
 
 const description =
   "Use this tool when the user asks about a transaction and provides a transaction reference (e.g. TXN-9001). " +
@@ -43,10 +43,11 @@ export function register(server: McpServer, ctx: ToolContext) {
         if (!present(input.transaction_id)) {
           return { status: "invalid", message: "Provide a transaction_id, for example TXN-9001." };
         }
-        const txn = await ctx.db.transactionById(normalizeRef(input.transaction_id, "TXN"));
+        // Independent reads, run together so a slow database costs one round-trip, not two.
+        const [txn, identified] = await Promise.all([ctx.db.transactionById(normalizeRef(input.transaction_id, "TXN")), identifiedFor(ctx)]);
         if (!txn) return { status: "not_found", data: notFound };
 
-        const access = await accessFor(ctx, txn.customer_id);
+        const access = accessFrom(identified, txn.customer_id);
         // Don't reveal that another customer's record exists.
         if (access === "other_customer") return { status: "not_found", data: notFound };
 

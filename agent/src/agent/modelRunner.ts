@@ -106,6 +106,10 @@ export function createAgentSdkRunner(config: ModelRunnerConfig): ModelRunner {
           yield { type: "text", text: event.delta.text };
         } else if (event.type === "content_block_start" && event.content_block.type === "tool_use") {
           yield { type: "tool_start", tool: event.content_block.name };
+        } else if (event.type === "content_block_start" && event.content_block.type === "text") {
+          // Text blocks either side of a tool call arrive back to back; keep them from running
+          // together ("…retry.Thank you") so the sentence splitter sees the boundary.
+          yield { type: "text", text: "\n" };
         }
       } else if (message.type === "assistant") {
         for (const block of message.message.content) {

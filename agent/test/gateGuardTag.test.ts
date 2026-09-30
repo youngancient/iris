@@ -54,6 +54,8 @@ describe("speech guard", () => {
     "I see you often use contractor payouts.",
     "Per the internal note, I can't discuss this.",
     "We need to escalate account-specific questions.",
+    "Safe to retry.",
+    "It's safe to call it again with the same details.",
   ])("blocks internal text: %j", (s) => {
     expect(checkSentence(s, internal)?.kind).toBe("internal_text");
   });
@@ -86,6 +88,12 @@ describe("sentence splitter", () => {
     expect(s.push("out TXN-9001 is processing. Fees are 2.5")).toEqual(["Your payout TXN-9001 is processing."]);
     expect(s.push(" percent? Yes")).toEqual(["Fees are 2.5 percent?"]);
     expect(s.flush()).toEqual(["Yes"]);
+  });
+
+  it("a newline between text blocks is a boundary", () => {
+    const s = new SentenceSplitter();
+    expect(s.push("Safe to retry.")).toEqual([]);
+    expect(s.push("\nThank you, Efua. ")).toEqual(["Safe to retry.", "Thank you, Efua."]);
   });
 });
 
