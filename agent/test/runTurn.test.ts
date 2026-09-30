@@ -1,17 +1,20 @@
 import { describe, expect, it, vi } from "vitest";
 import type { ModelEvent, ModelInput } from "../src/agent/modelRunner.js";
 import type { RetrievalResult } from "../src/agent/retrieval.js";
-import { FAILURE_REPLY, HOLDING_REPLY, LOOKUP_ACK, runTurn, type TurnDeps } from "../src/agent/runTurn.js";
+import { FAILURE_REPLY, HOLDING_REPLY, LOOKUP_ACK, runTurn, STALL_REPLY, type TurnDeps } from "../src/agent/runTurn.js";
 import { GUARD_FALLBACK } from "../src/agent/speechGuard.js";
 import { UNINTELLIGIBLE_LIMIT_REPLY, UNINTELLIGIBLE_REPLY } from "../src/agent/inputGate.js";
-import type { TurnClaim, TurnResult, TurnStore } from "../src/logging/turnStore.js";
+import type { PriorActions, TurnClaim, TurnResult, TurnStore } from "../src/logging/turnStore.js";
 
 class FakeStore implements TurnStore {
   turns = new Map<string, { status: string; result?: Partial<TurnResult>; error?: string; updatedAt: number }>();
   events: { type: string; metadata?: Record<string, unknown> }[] = [];
   rejected: string[] = [];
-  async ensureConversation() {}
-  async claimTurn(c: string, i: number): Promise<TurnClaim> {
+  prior: PriorActions = { identifiedCustomer: null, tickets: [], escalations: [] };
+  async priorActions() {
+    return this.prior;
+  }
+  async claimTurn(c: string, _channel: string, i: number): Promise<TurnClaim> {
     const key = `${c}:${i}`;
     const t = this.turns.get(key);
     if (!t) {
@@ -124,7 +127,7 @@ describe("runTurn", () => {
 
   it("a retry while the first attempt is still running gets a holding line", async () => {
     const { deps, store } = setup([result]);
-    await store.claimTurn("call-1", 0);
+    await store.claimTurn("call-1", "web", 0);
     expect(await collect(runTurn(deps, req("What fees do you charge?")))).toEqual([HOLDING_REPLY]);
   });
 
@@ -199,15 +202,43 @@ describe("runTurn", () => {
     expect(await collect(runTurn(deps, req("Can you check transaction TXN-9001?")))).toEqual([LOOKUP_ACK, FAILURE_REPLY]);
   });
 
-  it("a model that goes quiet is cut off by the timeout, without waiting for it", async () => {
+  it("a model silent at 8s gets a holding line, and is stopped (not waited on) at 20s", async () => {
     vi.useFakeTimers();
-    const { deps, store } = setup(async function* () {
+    const abortSeen: boolean[] = [];
+    const { deps, store } = setup(async function* (input) {
+      input.abortController.signal.addEventListener("abort", () => abortSeen.push(true));
       await new Promise(() => {}); // never yields
     });
-    const pending = collect(runTurn(deps, req("What fees do you charge?")));
+    const out: string[] = [];
+    const pending = (async () => {
+      for await (const s of runTurn(deps, req("What fees do you charge?"))) out.push(s);
+    })();
     await vi.advanceTimersByTimeAsync(8100);
-    expect(await pending).toEqual([FAILURE_REPLY]);
-    expect(store.turns.get("call-1:0")).toMatchObject({ status: "failed", error: "no model activity within 8s" });
+    expect(out).toEqual([STALL_REPLY]);
+    await vi.advanceTimersByTimeAsync(12_100);
+    await pending;
+    expect(out).toEqual([STALL_REPLY, FAILURE_REPLY]);
+    expect(abortSeen).toEqual([true]);
+    expect(store.turns.get("call-1:0")).toMatchObject({ status: "failed", error: "no model activity within 20s" });
+    vi.useRealTimers();
+  });
+
+  it("a slow start that recovers after the holding line still answers normally", async () => {
+    vi.useFakeTimers();
+    const { deps, store } = setup(async function* () {
+      await new Promise((r) => setTimeout(r, 9000));
+      yield { type: "activity" } as ModelEvent;
+      yield { type: "text", text: "Fees vary by corridor. [[type:answer;confidence:high]]" } as ModelEvent;
+      yield result;
+    });
+    const out: string[] = [];
+    const pending = (async () => {
+      for await (const s of runTurn(deps, req("What fees do you charge?"))) out.push(s);
+    })();
+    await vi.advanceTimersByTimeAsync(9500);
+    await pending;
+    expect(out).toEqual([STALL_REPLY, "Fees vary by corridor."]);
+    expect(store.turns.get("call-1:0")).toMatchObject({ status: "completed" });
     vi.useRealTimers();
   });
 
@@ -215,5 +246,22 @@ describe("runTurn", () => {
     const { deps, store } = setup([{ type: "text", text: "Is it incoming or outgoing? [[type:clarify;confidence:high]]" }, result]);
     await collect(runTurn(deps, req("My payment is stuck.")));
     expect(store.events.map((e) => e.type)).toContain("clarification_requested");
+  });
+
+  it("records per-phase timings on the turn", async () => {
+    const { deps, store } = setup([{ type: "text", text: "Fees vary. [[type:answer;confidence:high]]" }, result]);
+    await collect(runTurn(deps, req("What fees do you charge?")));
+    const timings = store.turns.get("call-1:0")?.result?.timings ?? {};
+    for (const phase of ["claim", "retrieval", "first_text", "first_spoken", "total"]) expect(timings[phase]).toBeTypeOf("number");
+  });
+
+  it("tells the model what this call already did, from the store", async () => {
+    const { deps, store, prompts } = setup([{ type: "text", text: "Your escalation is in. [[type:escalate;confidence:high]]" }, result]);
+    store.prior = { identifiedCustomer: "CUS-1003", tickets: [{ id: "TKT-1", turn: 0 }], escalations: [{ id: "ESC-1", turn: 2 }] };
+    await collect(runTurn(deps, req("Please escalate this again.", [{ role: "user", content: "My account is restricted." }, { role: "assistant", content: "Sorry." }])));
+    expect(prompts[0]).toContain("Already done in this call");
+    expect(prompts[0]).toContain("Support ticket TKT-1 created (turn 0)");
+    expect(prompts[0]).toContain("Escalation ESC-1 created (turn 2)");
+    expect(prompts[0]).toContain("verified as customer CUS-1003");
   });
 });

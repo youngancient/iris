@@ -163,6 +163,25 @@ describe("create_support_ticket", () => {
     expect(second.data.ticket_id).toBe(first.data.ticket_id);
   });
 
+  it("the same issue with a reference added later updates the first ticket instead of creating a second (S6)", async () => {
+    const db = seededDb();
+    const { call } = await connect(db);
+    const first = await call("create_support_ticket", { ...ticket, category: "invoice", summary: "Invoice payment failed, caller wants it checked." });
+    const second = await call("create_support_ticket", { ...ticket, category: "invoice", summary: "Failed invoice payment, reference TXN-9002." });
+    expect(second.data.ticket_id).toBe(first.data.ticket_id);
+    expect(db.tickets).toHaveLength(1);
+    expect(db.tickets[0].summary).toMatch(/Invoice payment failed.*Update: .*TXN-9002/);
+    expect(db.tickets[0].transaction_id).toBe("TXN-9002");
+  });
+
+  it("a different category in the same call is a separate ticket", async () => {
+    const db = seededDb();
+    const { call } = await connect(db);
+    await call("create_support_ticket", { ...ticket, category: "invoice" });
+    await call("create_support_ticket", { ...ticket, category: "account", summary: "Login problem" });
+    expect(db.tickets).toHaveLength(2);
+  });
+
   it("only the identified customer is attached; a model-supplied customer_id is not trusted", async () => {
     const db = seededDb();
     const { call } = await connect(db);
@@ -267,5 +286,31 @@ describe("logging and failures", () => {
     expect(result.isError).toBe(true);
     expect(result.text).toBe("Transaction lookup is temporarily unavailable. Please try again shortly.");
     expect(result.text).not.toMatch(/database/);
+  });
+
+  it("a tool past its deadline answers in time with a safe-to-retry message, and logs the real outcome later", async () => {
+    const db = seededDb();
+    const slowInsert = db.insertTicket.bind(db);
+    db.insertTicket = async (row) => {
+      await new Promise((r) => setTimeout(r, 80));
+      return slowInsert(row);
+    };
+    const server = (await import("../src/server.js")).buildServer({ db, conversationId: "conv-1", turnIndex: 0, deadlineMs: 20 });
+    const { InMemoryTransport } = await import("@modelcontextprotocol/sdk/inMemory.js");
+    const { Client } = await import("@modelcontextprotocol/sdk/client/index.js");
+    const [c, s] = InMemoryTransport.createLinkedPair();
+    await server.connect(s);
+    const client = new Client({ name: "t", version: "0" });
+    await client.connect(c);
+    const result = await client.callTool({
+      name: "create_support_ticket",
+      arguments: { category: "payment", priority: "high", summary: "TXN-9001 late", conversation_id: "conv-1" },
+    });
+    expect(result.isError).toBe(true);
+    expect((result.content as { text: string }[])[0].text).toMatch(/safe to call it again/);
+    await new Promise((r) => setTimeout(r, 150));
+    expect(db.tickets).toHaveLength(1);
+    expect(db.toolCalls[0]).toMatchObject({ status: "success" });
+    expect(db.toolCalls[0].error_message).toMatch(/after the 20ms deadline/);
   });
 });

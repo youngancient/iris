@@ -39,7 +39,7 @@ export function register(server: McpServer, ctx: ToolContext) {
     { description, inputSchema, outputSchema },
     withToolLogging(
       ctx,
-      { name: "create_escalation", purpose: description, failureMessage: "The escalation couldn't be saved right now. Don't tell the caller a specialist will follow up." },
+      { name: "create_escalation", purpose: description, failureMessage: "The escalation couldn't be saved right now. Don't tell the caller a specialist will follow up.", retrySafe: true },
       async (input: Input) => {
         const missing = (["user_name", "user_email", "category", "reason"] as const).filter((f) => !present(input[f]));
         if (missing.length > 0) {

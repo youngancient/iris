@@ -42,6 +42,8 @@ export type TicketInsert = {
   idempotency_key: string | null;
 };
 
+export type RecentTicket = { ticket_id: string; status: string; summary: string; transaction_id: string | null };
+
 export type EscalationInsert = {
   conversation_id: string | null;
   ticket_id: string | null;
@@ -88,12 +90,15 @@ export interface Db {
   ticketExists(ticketId: string): Promise<boolean>;
   /** Insert, or return the existing ticket with the same idempotency key. */
   insertTicket(row: TicketInsert): Promise<{ ticket_id: string; status: string }>;
+  /** The latest open ticket for this conversation and category created since sinceIso. */
   recentTicket(
     conversationId: string,
     category: string,
     customerId: string | null,
     sinceIso: string,
-  ): Promise<{ ticket_id: string; status: string } | null>;
+  ): Promise<RecentTicket | null>;
+  /** Adds new details to an existing ticket (e.g. a reference the caller gave later). */
+  updateTicket(ticketId: string, fields: { summary: string; transaction_id: string | null }): Promise<void>;
 
   /** Insert, or return the open escalation for the same conversation and category. */
   insertEscalation(row: EscalationInsert): Promise<{ escalation_id: string; status: string; created: boolean }>;

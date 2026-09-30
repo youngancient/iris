@@ -1,5 +1,5 @@
 import { createClient, type PostgrestError } from "@supabase/supabase-js";
-import type { CustomerRow, Db, PayoutRow, TransactionRow } from "./types.js";
+import type { CustomerRow, Db, PayoutRow, RecentTicket, TransactionRow } from "./types.js";
 
 const QUERY_TIMEOUT_MS = 4000;
 
@@ -124,16 +124,22 @@ export function createSupabaseDb(url: string, serviceKey: string): Db {
     async recentTicket(conversationId, category, customerId, sinceIso) {
       let query = client
         .from("support_tickets")
-        .select("ticket_id, status")
+        .select("ticket_id, status, summary, transaction_id")
         .eq("conversation_id", conversationId)
         .eq("category", category)
+        .neq("status", "closed")
         .gte("created_at", sinceIso)
         .order("created_at", { ascending: false })
         .limit(1);
       query = customerId ? query.eq("customer_id", customerId) : query.is("customer_id", null);
       const { data, error } = await query;
       check(error, "recentTicket");
-      return ((data ?? [])[0] ?? null) as { ticket_id: string; status: string } | null;
+      return ((data ?? [])[0] ?? null) as RecentTicket | null;
+    },
+
+    async updateTicket(ticketId, fields) {
+      const { error } = await client.from("support_tickets").update(fields).eq("ticket_id", ticketId);
+      check(error, "updateTicket");
     },
 
     async insertEscalation(row) {

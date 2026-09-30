@@ -43,7 +43,12 @@ export type RetrievalDeps = {
   matchCount?: number;
 };
 
-export type RetrievalScope = { conversationId: string | null; turnIndex: number | null };
+export type RetrievalScope = {
+  conversationId: string | null;
+  turnIndex: number | null;
+  /** The log row references the conversation, so it waits until the turn is claimed. */
+  ready?: Promise<unknown>;
+};
 
 export function createRetriever(deps: RetrievalDeps) {
   const matchCount = deps.matchCount ?? 4;
@@ -63,6 +68,7 @@ export function createRetriever(deps: RetrievalDeps) {
     }
 
     // Logging never blocks or fails the answer.
+    await Promise.resolve(scope.ready).catch(() => {});
     await deps
       .log({
         conversation_id: scope.conversationId,

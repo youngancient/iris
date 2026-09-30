@@ -7,7 +7,7 @@ import {
   UNINTELLIGIBLE_LIMIT_REPLY,
   UNINTELLIGIBLE_REPLY,
 } from "./inputGate.js";
-import type { ModelRunner } from "./modelRunner.js";
+import type { ModelEvent, ModelRunner } from "./modelRunner.js";
 import { TagStripper } from "./outcomeTag.js";
 import { formatForPrompt, type RetrievalResult, type RetrievalScope } from "./retrieval.js";
 import { checkSentence, GUARD_FALLBACK, internalSegments, SentenceSplitter, type InternalText } from "./speechGuard.js";
@@ -18,12 +18,14 @@ import { buildTurnPrompt, PROMPT_VERSION } from "./systemPrompt.js";
 export const HOLDING_REPLY = "One moment, I'm still working on that.";
 export const FAILURE_REPLY =
   "I'm having trouble right now. Please try again in a few minutes, or contact support from your RelayPay dashboard.";
-
 export const LOOKUP_ACK = "Let me check that for you.";
+export const STALL_REPLY = "Sorry, just a moment.";
 
-// The model must show signs of life within 8s (design §7.1), and a whole turn,
-// tool calls included, gets 25s. Either limit ends the turn with the failure line.
-const FIRST_ACTIVITY_TIMEOUT_MS = 8000;
+// No model activity after 8s: say a holding line and keep waiting (occasionally the
+// SDK is slow to start; giving up there would fail a turn that was about to succeed).
+// No activity by 20s, or a whole turn over 25s: stop the SDK and fail the turn (design §7.1).
+const STALL_NOTICE_MS = 8000;
+const FIRST_ACTIVITY_TIMEOUT_MS = 20_000;
 const TURN_TIMEOUT_MS = 25_000;
 const RETRY_IN_PROGRESS_MS = 30_000;
 const INTERNAL_FIELDS = ["support_notes", "support_summary"] as const;
@@ -62,7 +64,8 @@ async function safely(what: string, fn: () => Promise<unknown>) {
 export async function* runTurn(deps: TurnDeps, req: TurnRequest): AsyncGenerator<string> {
   const now = deps.now ?? Date.now;
   const started = now();
-  const { store, conversationId: conv } = { store: deps.store, conversationId: req.conversationId };
+  const store = deps.store;
+  const conv = req.conversationId;
 
   const history = req.messages
     .filter((m) => m.role === "user" || m.role === "assistant")
@@ -74,9 +77,16 @@ export async function* runTurn(deps: TurnDeps, req: TurnRequest): AsyncGenerator
   // Stable across Vapi retries of the same turn: the number of caller messages so far.
   const turnIndex = Math.max(0, history.filter((m) => m.role === "user").length - 1);
 
+  const timings: Record<string, number> = {};
+  const mark = (phase: string) => {
+    if (timings[phase] === undefined) timings[phase] = now() - started;
+  };
+
   const gate = classifyInput(latest);
-  const scope = { conversationId: conv, turnIndex };
-  // Retrieval runs alongside the database round-trips below (design §2 step 3b).
+  // Claimed first so the conversation row exists before anything references it.
+  const claimed = store.claimTurn(conv, req.channel, turnIndex, latest);
+  const scope = { conversationId: conv, turnIndex, ready: claimed };
+  // Retrieval runs alongside the database round-trip below (design §2 step 3b).
   const retrieval =
     gate === "normal" && !isDataOnly(latest)
       ? deps.retrieve(latest, scope).catch((err) => {
@@ -85,8 +95,16 @@ export async function* runTurn(deps: TurnDeps, req: TurnRequest): AsyncGenerator
         })
       : Promise.resolve(null);
 
-  await store.ensureConversation(conv, req.channel);
-  const claim = await store.claimTurn(conv, turnIndex, latest);
+  // What this call already did, read in parallel with retrieval (design: stateless turns, state from our records).
+  const priorActions = turnIndex === 0
+    ? Promise.resolve(null)
+    : store.priorActions(conv).catch((err) => {
+        console.error(JSON.stringify({ level: "error", msg: "priorActions failed", err: String(err) }));
+        return null;
+      });
+
+  const claim = await claimed;
+  mark("claim");
   if (claim.state === "completed") {
     yield claim.response;
     return;
@@ -105,16 +123,19 @@ export async function* runTurn(deps: TurnDeps, req: TurnRequest): AsyncGenerator
     await safely("completeTurn", () =>
       store.completeTurn(conv, turnIndex, {
         ...base, assistantResponse: reply, answerType: "clarify", confidenceNote: "unintelligible",
-        retrievalUsed: false, latencyMs: now() - started,
+        retrievalUsed: false, latencyMs: now() - started, timings: { ...timings, total: now() - started },
       }),
     );
     return;
   }
 
   const retrieved = await retrieval;
+  mark("retrieval");
   const knowledge = retrieved ? formatForPrompt(retrieved) : null;
   let kbSearched = false;
-  const prompt = buildTurnPrompt({ conversationId: conv, history: prior, latest, knowledge, smallTalk: gate === "small_talk" });
+  const prompt = buildTurnPrompt({
+    conversationId: conv, history: prior, latest, knowledge, smallTalk: gate === "small_talk", priorActions: await priorActions,
+  });
 
   const internal: InternalText[] = [];
   const spoken: string[] = [];
@@ -141,6 +162,7 @@ export async function* runTurn(deps: TurnDeps, req: TurnRequest): AsyncGenerator
         continue;
       }
       spoken.push(sentence);
+      mark("first_spoken");
       yield sentence;
     }
   };
@@ -161,7 +183,15 @@ export async function* runTurn(deps: TurnDeps, req: TurnRequest): AsyncGenerator
       abort.abort();
       stop(new Error(why));
     }, ms);
-  const timers = [limit(FIRST_ACTIVITY_TIMEOUT_MS, "no model activity within 8s", true), limit(TURN_TIMEOUT_MS, "turn exceeded 25s", false)];
+  const timers = [limit(FIRST_ACTIVITY_TIMEOUT_MS, "no model activity within 20s", true), limit(TURN_TIMEOUT_MS, "turn exceeded 25s", false)];
+  // Resolves if the model is still silent at 8s, so the loop below can speak a holding line.
+  let stallTimer: NodeJS.Timeout | undefined;
+  const stalled = new Promise<"stalled">((resolve) => {
+    stallTimer = setTimeout(() => resolve("stalled"), STALL_NOTICE_MS);
+  });
+  timers.push(stallTimer!);
+  let stallNoticed = false;
+  let pending: Promise<IteratorResult<ModelEvent>> | undefined;
 
   try {
     const events = deps.runModel({
@@ -177,10 +207,24 @@ export async function* runTurn(deps: TurnDeps, req: TurnRequest): AsyncGenerator
     });
 
     const iterator = events[Symbol.asyncIterator]();
+    pending = iterator.next();
     while (true) {
-      const next = await Promise.race([iterator.next(), stopped]);
+      const next = await Promise.race([pending, stopped, ...(stallNoticed || sawActivity ? [] : [stalled])]);
+      if (next === "stalled") {
+        stallNoticed = true;
+        mark("stall_notice");
+        console.error(JSON.stringify({ level: "warn", msg: "model silent after 8s, holding", conversation_id: conv, turn_index: turnIndex }));
+        if (spoken.length === 0) yield* speak([STALL_REPLY]);
+        continue; // keep waiting on the same pending event
+      }
       if (next.done) break;
+      pending = iterator.next();
       const event = next.value;
+      if (event.type === "mcp_status") mark("sdk_init");
+      else if (event.type === "activity") mark("first_activity");
+      else if (event.type === "text") mark("first_text");
+      else if (event.type === "tool_start") mark("first_tool");
+
       if (event.type === "activity") {
         sawActivity = true;
       } else if (event.type === "tool_start") {
@@ -197,6 +241,11 @@ export async function* runTurn(deps: TurnDeps, req: TurnRequest): AsyncGenerator
         if (event.isError) {
           if (/Input validation error/i.test(event.text)) {
             await safely("toolCallRejected", () => store.toolCallRejected(conv, turnIndex, event.tool, event.text));
+          } else {
+            // Any error the model saw (including the SDK giving up on a tool), so it shows in v_failures.
+            await safely("tool error event", () =>
+              store.event(conv, "tool_error_seen", `${event.tool} returned an error to the model.`, { turn_index: turnIndex, tool: event.tool, error: event.text.slice(0, 200) }),
+            );
           }
           continue;
         }
@@ -229,10 +278,12 @@ export async function* runTurn(deps: TurnDeps, req: TurnRequest): AsyncGenerator
     modelError = timedOut ?? String(err);
   } finally {
     for (const t of timers) clearTimeout(t);
+    // After a stop, the SDK's last pending read may reject once its process is killed.
+    pending?.catch(() => {});
   }
 
-  // Only the lookup acknowledgement was said: the caller still needs an answer.
-  if (!spoken.some((s) => s !== LOOKUP_ACK)) {
+  // Nothing but (at most) a holding line was said: the caller still needs a reply.
+  if (!spoken.some((s) => s !== LOOKUP_ACK && s !== STALL_REPLY)) {
     const fallback = modelError || blocked === 0 ? FAILURE_REPLY : GUARD_FALLBACK;
     spoken.push(fallback);
     yield fallback;
@@ -251,6 +302,7 @@ export async function* runTurn(deps: TurnDeps, req: TurnRequest): AsyncGenerator
     model: deps.model,
     promptVersion: PROMPT_VERSION,
     ...metrics,
+    timings: { ...timings, total: now() - started },
   };
 
   if (modelError) {

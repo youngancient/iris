@@ -94,10 +94,16 @@ export class MemoryDb implements Db {
           t.conversation_id === conversationId &&
           t.category === category &&
           t.customer_id === customerId &&
+          t.status !== "closed" &&
           t.created_at >= sinceIso,
       )
       .at(-1);
-    return hit ? { ticket_id: hit.ticket_id, status: hit.status } : null;
+    return hit ? { ticket_id: hit.ticket_id, status: hit.status, summary: hit.summary, transaction_id: hit.transaction_id } : null;
+  }
+  async updateTicket(ticketId: string, fields: { summary: string; transaction_id: string | null }) {
+    this.guard();
+    const t = this.tickets.find((x) => x.ticket_id === ticketId);
+    if (t) Object.assign(t, fields);
   }
   async insertEscalation(row: EscalationInsert) {
     this.guard();

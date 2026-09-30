@@ -21,12 +21,24 @@ export type TurnResult = {
   inputTokens: number | null;
   outputTokens: number | null;
   cacheReadTokens: number | null;
+  /** Milliseconds per phase, measured from the start of the request. */
+  timings: Record<string, number>;
+};
+
+/** What this call has already done, from our own records (never from the model). */
+export type PriorActions = {
+  identifiedCustomer: string | null;
+  tickets: { id: string; turn: number | null }[];
+  escalations: { id: string; turn: number | null }[];
 };
 
 export interface TurnStore {
-  ensureConversation(conversationId: string, channel: string): Promise<void>;
-  /** Claims (conversation, turn) for this request, or reports what an earlier attempt left. */
-  claimTurn(conversationId: string, turnIndex: number, userTranscript: string): Promise<TurnClaim>;
+  priorActions(conversationId: string): Promise<PriorActions>;
+  /**
+   * Creates the conversation if needed and claims (conversation, turn) for this
+   * request, or reports what an earlier attempt left. One round-trip (migration 004).
+   */
+  claimTurn(conversationId: string, channel: string, turnIndex: number, userTranscript: string): Promise<TurnClaim>;
   completeTurn(conversationId: string, turnIndex: number, result: TurnResult): Promise<void>;
   failTurn(conversationId: string, turnIndex: number, error: string, result: Partial<TurnResult>): Promise<void>;
   event(conversationId: string, eventType: string, summary: string, metadata?: Record<string, unknown>): Promise<void>;
@@ -46,6 +58,7 @@ const turnRow = (r: Partial<TurnResult>) => ({
   input_tokens: r.inputTokens,
   output_tokens: r.outputTokens,
   cache_read_tokens: r.cacheReadTokens,
+  timings: r.timings,
   updated_at: new Date().toISOString(),
 });
 
@@ -55,31 +68,45 @@ export function createSupabaseTurnStore(supabase: SupabaseClient): TurnStore {
   };
 
   return {
-    async ensureConversation(conversationId, channel) {
-      const { error } = await supabase
-        .from("conversations")
-        .upsert({ conversation_id: conversationId, channel, caller_id: conversationId }, { onConflict: "conversation_id", ignoreDuplicates: true });
-      check(error, "ensureConversation");
+    async claimTurn(conversationId, channel, turnIndex, userTranscript) {
+      const { data, error } = await supabase.rpc("claim_turn", {
+        p_conversation_id: conversationId,
+        p_channel: channel,
+        p_turn_index: turnIndex,
+        p_transcript: userTranscript,
+      });
+      check(error, "claimTurn");
+      const row = (data as { state: string; response: string | null; age_ms: number }[])[0];
+      if (!row) throw new Error("claimTurn: no result");
+      if (row.state === "claimed") return { state: "claimed" };
+      if (row.state === "completed") return { state: "completed", response: row.response ?? "" };
+      if (row.state === "in_progress") return { state: "in_progress", ageMs: Number(row.age_ms) };
+      return { state: "failed" };
     },
 
-    async claimTurn(conversationId, turnIndex, userTranscript) {
-      const { error } = await supabase
-        .from("conversation_turns")
-        .insert({ conversation_id: conversationId, turn_index: turnIndex, user_transcript: userTranscript, status: "in_progress" });
-      if (!error) return { state: "claimed" };
-      if (error.code !== "23505") check(error, "claimTurn");
-
-      const { data, error: readError } = await supabase
-        .from("conversation_turns")
-        .select("status, assistant_response, updated_at")
-        .eq("conversation_id", conversationId)
-        .eq("turn_index", turnIndex)
-        .single();
-      check(readError, "claimTurn");
-      if (!data) throw new Error("claimTurn: turn row vanished after a conflict");
-      if (data.status === "completed") return { state: "completed", response: data.assistant_response ?? "" };
-      if (data.status === "in_progress") return { state: "in_progress", ageMs: Date.now() - Date.parse(data.updated_at) };
-      return { state: "failed" };
+    async priorActions(conversationId) {
+      const [convo, calls] = await Promise.all([
+        supabase.from("conversations").select("identified_customer_id").eq("conversation_id", conversationId).maybeSingle(),
+        supabase
+          .from("tool_calls")
+          .select("tool_name, turn_index, result_summary")
+          .eq("conversation_id", conversationId)
+          .eq("status", "success")
+          .in("tool_name", ["create_support_ticket", "create_escalation"])
+          .order("created_at"),
+      ]);
+      check(convo.error, "priorActions");
+      check(calls.error, "priorActions");
+      const seen = new Set<string>();
+      const actions: PriorActions = { identifiedCustomer: convo.data?.identified_customer_id ?? null, tickets: [], escalations: [] };
+      for (const c of calls.data ?? []) {
+        const summary = (c.result_summary ?? {}) as Record<string, unknown>;
+        const id = String(summary.ticket_id ?? summary.escalation_id ?? "");
+        if (!id || seen.has(id)) continue;
+        seen.add(id);
+        (c.tool_name === "create_support_ticket" ? actions.tickets : actions.escalations).push({ id, turn: c.turn_index });
+      }
+      return actions;
     },
 
     async completeTurn(conversationId, turnIndex, result) {

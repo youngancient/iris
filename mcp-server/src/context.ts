@@ -8,6 +8,8 @@ export type ToolContext = {
   db: Db;
   conversationId: string | null;
   turnIndex: number | null;
+  /** Per-tool deadline override (tests); defaults to TOOL_DEADLINE_MS. */
+  deadlineMs?: number;
 };
 
 /**

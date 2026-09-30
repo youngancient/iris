@@ -7,7 +7,7 @@ import type { TurnStore } from "../src/logging/turnStore.js";
 const SECRET = "vapi-secret-that-is-at-least-32-characters";
 
 const turnStore: TurnStore = {
-  ensureConversation: async () => {},
+  priorActions: async () => ({ identifiedCustomer: null, tickets: [], escalations: [] }),
   claimTurn: async () => ({ state: "claimed" }),
   completeTurn: async () => {},
   failTurn: async () => {},

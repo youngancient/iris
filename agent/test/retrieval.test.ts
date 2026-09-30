@@ -98,4 +98,17 @@ describe("createRetriever", () => {
     const { retrieve } = setup({ log: async () => { throw new Error("db down"); } });
     await expect(retrieve("fees", scope)).resolves.toMatchObject({ matched: true });
   });
+
+  it("waits for the turn claim before writing the log row", async () => {
+    const order: string[] = [];
+    const { retrieve } = setup({ log: async () => void order.push("log") });
+    let release!: () => void;
+    const ready = new Promise<void>((r) => (release = r)).then(() => void order.push("claimed"));
+    const pending = retrieve("fees", { ...scope, ready });
+    await new Promise((r) => setTimeout(r, 10));
+    expect(order).toEqual([]);
+    release();
+    await pending;
+    expect(order).toEqual(["claimed", "log"]);
+  });
 });

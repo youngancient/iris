@@ -71,7 +71,8 @@ export function createAgentSdkRunner(config: ModelRunnerConfig): ModelRunner {
               "x-conversation-id": input.conversationId,
               "x-turn-index": String(input.turnIndex),
             },
-            timeout: 6000,
+            // Above the MCP server's own 5s per-tool deadline, so the server always answers first.
+            timeout: 10_000,
           },
           kb,
         },
@@ -88,6 +89,12 @@ export function createAgentSdkRunner(config: ModelRunnerConfig): ModelRunner {
         abortController: input.abortController,
       },
     });
+
+    // Aborting the controller alone doesn't reliably stop the CLI process: a tool can
+    // still run after we've given up. close() terminates it (and its MCP transports).
+    const kill = () => stream.close();
+    if (input.abortController.signal.aborted) kill();
+    input.abortController.signal.addEventListener("abort", kill, { once: true });
 
     for await (const message of stream) {
       if (message.type === "system" && message.subtype === "init") {
