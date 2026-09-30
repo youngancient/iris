@@ -1,0 +1,54 @@
+/* Brand: professional, calm, minimal. Deep blue primary, teal accent, off-white background. */
+:root {
+  --blue-900: #0b2545;
+  --blue-700: #13315c;
+  --teal-600: #1b7f86;
+  --bg: #f6f7f9;
+  --surface: #ffffff;
+  --border: #e3e6eb;
+  --text: #1c2430;
+  --muted: #5f6b7a;
+  --radius: 10px;
+  font-family: Inter, system-ui, -apple-system, "Segoe UI", sans-serif;
+  color: var(--text);
+}
+
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); }
+
+.page { max-width: 560px; margin: 0 auto; padding: 24px 16px; }
+.header { display: flex; align-items: baseline; gap: 8px; margin-bottom: 48px; }
+.logo { font-weight: 600; font-size: 18px; color: var(--blue-900); }
+.tag { color: var(--muted); font-size: 14px; }
+
+.panel {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 32px 24px;
+  text-align: center;
+}
+h1 { font-size: 22px; font-weight: 600; color: var(--blue-900); margin: 0 0 8px; }
+.muted { color: var(--muted); margin: 0 0 28px; }
+
+.button {
+  font: inherit; font-weight: 500;
+  padding: 12px 28px;
+  border-radius: var(--radius);
+  border: 1px solid var(--blue-900);
+  background: var(--blue-900);
+  color: #fff;
+  cursor: pointer;
+}
+.button:hover { background: var(--blue-700); }
+.button-secondary { background: transparent; color: var(--blue-900); }
+.button-secondary:hover { background: var(--bg); }
+
+.status { margin: 20px 0 0; color: var(--muted); font-size: 14px; }
+.dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--border); margin-right: 6px; }
+.dot-connecting, .dot-listening { background: var(--teal-600); }
+.dot-speaking { background: var(--blue-900); }
+
+.transcript { list-style: none; padding: 0; margin: 28px 0 0; text-align: left; font-size: 14px; }
+.transcript li { padding: 8px 0; border-top: 1px solid var(--border); }
+.who { font-weight: 500; color: var(--blue-900); margin-right: 6px; }
