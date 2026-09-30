@@ -1,4 +1,4 @@
--- Knowledge base chunks for retrieval (voyage-3-lite = 512 dims)
+-- Knowledge base chunks for retrieval (Voyage embeddings at 512 dimensions)
 
 create extension if not exists vector;
 
