@@ -6,6 +6,10 @@ import { StatusForm } from "./status-form";
 
 const LIMIT = 50;
 
+// The bar on each row's left edge: escalations need a person, high and urgent tickets come next.
+const ESCALATION_RAIL = "border-l-danger";
+const ticketRail = (priority: string) => (priority === "urgent" || priority === "high" ? "border-l-warn" : "border-l-border");
+
 type Escalation = {
   escalation_id: string; conversation_id: string | null; ticket_id: string | null; customer_id: string | null; user_name: string | null;
   user_email: string | null; category: string; reason: string; preferred_time: string | null; status: string; created_at: string; staff_note: string | null;
@@ -54,6 +58,10 @@ export default async function QueuePage({ searchParams }: { searchParams: Promis
         <div>
           <h1 className="text-xl font-semibold">Queue</h1>
           <p className="mt-1 text-[14px] text-muted">Callers Iris handed to the team. Newest first.</p>
+          <p className="mt-1 flex flex-wrap items-center gap-x-4 gap-y-1 text-[13px] text-muted">
+            <span className="flex items-center gap-1.5"><span className="h-3 w-1 rounded-full bg-danger" aria-hidden="true" />Specialist callback</span>
+            <span className="flex items-center gap-1.5"><span className="h-3 w-1 rounded-full bg-warn" aria-hidden="true" />High or urgent ticket</span>
+          </p>
         </div>
         <div className="flex flex-wrap gap-2">
           {tab("Needs attention", q(false, includeTests), !showClosed)}
@@ -69,7 +77,7 @@ export default async function QueuePage({ searchParams }: { searchParams: Promis
         {escalations.length === 0 && <p className="mt-2 text-[14px] text-muted">Nothing here.</p>}
         <ul className="mt-3 space-y-3">
           {escalations.map((e) => (
-            <li key={e.escalation_id} className="rounded-lg border border-border bg-surface p-4">
+            <li key={e.escalation_id} className={`rounded-lg border border-l-4 border-border bg-surface p-4 ${ESCALATION_RAIL}`}>
               <div className="flex flex-wrap items-baseline justify-between gap-2">
                 <p className="text-[15px] font-medium">{e.user_name ?? "Unknown caller"} <span className="font-normal text-muted">· {e.category}</span></p>
                 <p className="text-[13px] text-muted" title={dateTime(e.created_at)}>{STATUS_LABEL[e.status] ?? e.status} · {timeAgo(e.created_at)}</p>
@@ -95,7 +103,7 @@ export default async function QueuePage({ searchParams }: { searchParams: Promis
         {ticketRows.length === 0 && <p className="mt-2 text-[14px] text-muted">Nothing here.</p>}
         <ul className="mt-3 space-y-3">
           {ticketRows.map((t) => (
-            <li key={t.ticket_id} className="rounded-lg border border-border bg-surface p-4">
+            <li key={t.ticket_id} className={`rounded-lg border border-l-4 border-border bg-surface p-4 ${ticketRail(t.priority)}`}>
               <div className="flex flex-wrap items-baseline justify-between gap-2">
                 <p className="text-[15px] font-medium capitalize">{t.category} <span className="font-normal normal-case text-muted">· {t.priority} priority</span></p>
                 <p className="text-[13px] text-muted" title={dateTime(t.created_at)}>{STATUS_LABEL[t.status] ?? t.status} · {timeAgo(t.created_at)}</p>

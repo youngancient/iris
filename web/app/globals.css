@@ -12,6 +12,7 @@
   --primary-hover: #0e2f58;
   --accent: #1f7f8c;
   --danger: #a33a3a;
+  --warn: #b7791f;
 }
 
 @theme inline {
@@ -24,6 +25,7 @@
   --color-primary-hover: var(--primary-hover);
   --color-accent: var(--accent);
   --color-danger: var(--danger);
+  --color-warn: var(--warn);
   --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
 }
 
