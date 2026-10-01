@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Embedder } from "../kb/voyage.js";
+import { log } from "../logger.js";
 
 // Knowledge-base search (design §2 step 3b, §7.1). Vector search first; if the
 // embedding provider is down or slow, Postgres full-text search instead.
@@ -62,7 +63,7 @@ export function createRetriever(deps: RetrievalDeps) {
       const matched = topScore !== null && topScore >= deps.similarityThreshold;
       result = { chunks: matched ? hits.filter((h) => h.score >= deps.similarityThreshold) : [], matched, method: "vector", topScore };
     } catch (err) {
-      console.error(JSON.stringify({ level: "warn", msg: "vector search failed, using full-text fallback", err: String(err) }));
+      log.warn({ err }, "vector search failed, using full-text fallback");
       const hits = await deps.ftsSearch(query, matchCount);
       result = { chunks: hits, matched: hits.length > 0, method: "fts_fallback", topScore: hits[0]?.score ?? null };
     }
@@ -81,7 +82,7 @@ export function createRetriever(deps: RetrievalDeps) {
         matched: result.matched,
         method: result.method,
       })
-      .catch((err) => console.error(JSON.stringify({ level: "error", msg: "retrieval log failed", err: String(err) })));
+      .catch((err) => log.error({ err }, "retrieval log failed"));
 
     return result;
   };

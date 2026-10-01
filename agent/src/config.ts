@@ -16,7 +16,7 @@ export function loadRetrievalConfig() {
     // Must match what the knowledge base was ingested with, and support 512 dimensions.
     voyageModel: optionalString("VOYAGE_MODEL", "voyage-4-lite", /^voyage-[a-z0-9.-]+$/),
     // Normal query embedding is ~100–300ms; past this, full-text search is faster (design §7.1).
-    embedTimeoutMs: optionalInt("EMBED_TIMEOUT_MS", 1000, 100, 10_000),
+    embedTimeoutMs: optionalInt("EMBED_TIMEOUT_MS", 2000, 100, 10_000),
     // Calibrated on voyage-4-lite (2026-09-30): on-topic 0.40–0.59, off-topic 0.13–0.24.
     similarityThreshold: optionalNumber("RETRIEVAL_THRESHOLD", 0.35, 0, 1),
   };

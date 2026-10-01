@@ -20,7 +20,7 @@ export default async function Home() {
   return (
     <div className="flex flex-1 flex-col">
       <header className="border-b border-border bg-surface">
-        <div className="mx-auto flex h-14 w-full max-w-3xl items-center justify-between gap-3 px-4 sm:px-6">
+        <div className="mx-auto flex h-14 w-full max-w-5xl items-center justify-between gap-3 px-4 sm:px-6">
           <Logo />
           {customer ? (
             <div className="flex items-center gap-3 text-[13px]">
@@ -35,22 +35,16 @@ export default async function Home() {
         </div>
       </header>
 
-      <main className="mx-auto flex w-full max-w-3xl flex-1 flex-col px-4 py-10 sm:px-6 sm:py-14">
-        <h1 className="text-2xl font-semibold tracking-tight">Support</h1>
-        <p className="mt-2 max-w-xl text-[15px] leading-6 text-muted">
-          Talk to Iris, RelayPay&apos;s voice support assistant. Iris can answer questions about payments, payouts,
-          invoicing and fees, check a transaction or payout, and connect you with a specialist when needed.
+      <main className="mx-auto flex w-full max-w-5xl flex-1 flex-col px-4 py-10 sm:px-6 sm:py-14">
+        <h1 className="text-[28px] font-semibold leading-tight tracking-tight">Talk to RelayPay support</h1>
+        <p className="mt-3 max-w-2xl text-[16px] leading-7 text-muted">
+          Iris is our voice assistant. She can answer questions about payments, payouts, invoicing and fees, check a
+          transaction or payout, and pass you to a specialist when needed.
         </p>
 
-        <p className="mt-4 text-[14px] text-muted">
-          {customer
-            ? `You're signed in as ${customer.companyName}, so Iris can go through your account with you.`
-            : "Sign in to discuss your own account with Iris. General questions don't need it."}
-        </p>
+        <CallPanel signedIn={Boolean(customer)} />
 
-        <CallPanel />
-
-        <section className="mt-8 grid gap-4 text-[14px] leading-6 text-muted sm:grid-cols-2">
+        <section className="mt-12 grid gap-6 border-t border-border pt-8 text-[14px] leading-6 text-muted sm:grid-cols-2 lg:grid-cols-[minmax(0,5fr)_minmax(0,6fr)] lg:gap-12">
           <div>
             <h2 className="font-medium text-foreground">Before you call</h2>
             <p className="mt-1">
@@ -69,7 +63,7 @@ export default async function Home() {
       </main>
 
       <footer className="border-t border-border bg-surface">
-        <div className="mx-auto flex h-12 w-full max-w-3xl items-center justify-between px-4 text-[13px] text-muted sm:px-6">
+        <div className="mx-auto flex h-12 w-full max-w-5xl items-center justify-between px-4 text-[13px] text-muted sm:px-6">
           <span>RelayPay</span>
           <Link href="/admin" className="hover:text-foreground">Staff sign-in</Link>
         </div>

@@ -1,4 +1,5 @@
 import type { Db } from "./db/types.js";
+import { log } from "./logger.js";
 
 /**
  * Per-request context. conversationId comes from the X-Conversation-Id header
@@ -29,7 +30,7 @@ export async function resolveConversationId(ctx: ToolContext, fromInput: string 
         summary: "Tool input conversation_id differed from the request header; the header value was used.",
         metadata: { input_conversation_id: given },
       })
-      .catch((err) => console.error(JSON.stringify({ level: "error", msg: "event log failed", err: String(err) })));
+      .catch((err) => log.error({ err }, "event log failed"));
   }
   return ctx.conversationId;
 }

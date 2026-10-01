@@ -4,6 +4,7 @@ import { z } from "zod";
 import { END_CALL_PHRASE, FAILURE_REPLY, runTurn, type TurnDeps } from "../agent/runTurn.js";
 import { extractCallToken, verifyCallToken } from "../callToken.js";
 import type { CallGateStore } from "../logging/callGateStore.js";
+import { log } from "../logger.js";
 
 export const CALL_REJECTED_REPLY = `Sorry, this call couldn't be started. Please refresh the page and try again. ${END_CALL_PHRASE}`;
 
@@ -36,7 +37,7 @@ export function chatCompletions(deps: TurnDeps, gate: CallGate | null) {
   return async (req: Request, res: Response) => {
     const parsed = body.safeParse(req.body);
     if (!parsed.success) {
-      console.error(JSON.stringify({ level: "warn", msg: "bad chat/completions body", issues: parsed.error.issues.map((i) => i.path.join(".")) }));
+      log.warn({ issues: parsed.error.issues.map((i) => i.path.join(".")) }, "bad chat/completions body");
       res.status(400).json({ error: "invalid request" });
       return;
     }
@@ -78,7 +79,7 @@ export function chatCompletions(deps: TurnDeps, gate: CallGate | null) {
         spokeAnything = true;
       }
     } catch (err) {
-      console.error(JSON.stringify({ level: "error", msg: "turn failed", conversation_id: call.id, err: String(err) }));
+      log.error({ conversation_id: call.id, err }, "turn failed");
       if (!spokeAnything) send(FAILURE_REPLY);
     }
     send(null, "stop");

@@ -39,8 +39,9 @@ export interface TurnStore {
    * request, or reports what an earlier attempt left. One round-trip (migration 004).
    */
   claimTurn(conversationId: string, channel: string, turnIndex: number, userTranscript: string): Promise<TurnClaim>;
-  completeTurn(conversationId: string, turnIndex: number, result: TurnResult): Promise<void>;
-  failTurn(conversationId: string, turnIndex: number, error: string, result: Partial<TurnResult>): Promise<void>;
+  /** Writes only if the turn still holds this transcript: a newer attempt may have taken it over (migration 011). */
+  completeTurn(conversationId: string, turnIndex: number, result: TurnResult, transcript: string): Promise<void>;
+  failTurn(conversationId: string, turnIndex: number, error: string, result: Partial<TurnResult>, transcript: string): Promise<void>;
   event(conversationId: string, eventType: string, summary: string, metadata?: Record<string, unknown>): Promise<void>;
   /** Tool calls the MCP SDK rejected before our server code ran (e.g. a missing required field). */
   toolCallRejected(conversationId: string, turnIndex: number, tool: string, error: string): Promise<void>;
@@ -109,21 +110,23 @@ export function createSupabaseTurnStore(supabase: SupabaseClient): TurnStore {
       return actions;
     },
 
-    async completeTurn(conversationId, turnIndex, result) {
+    async completeTurn(conversationId, turnIndex, result, transcript) {
       const { error } = await supabase
         .from("conversation_turns")
         .update({ ...turnRow(result), status: "completed", error_message: null })
         .eq("conversation_id", conversationId)
-        .eq("turn_index", turnIndex);
+        .eq("turn_index", turnIndex)
+        .eq("user_transcript", transcript);
       check(error, "completeTurn");
     },
 
-    async failTurn(conversationId, turnIndex, message, result) {
+    async failTurn(conversationId, turnIndex, message, result, transcript) {
       const { error } = await supabase
         .from("conversation_turns")
         .update({ ...turnRow(result), status: "failed", error_message: message })
         .eq("conversation_id", conversationId)
-        .eq("turn_index", turnIndex);
+        .eq("turn_index", turnIndex)
+        .eq("user_transcript", transcript);
       check(error, "failTurn");
     },
 

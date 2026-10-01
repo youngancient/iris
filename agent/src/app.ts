@@ -4,6 +4,7 @@ import type { TurnDeps } from "./agent/runTurn.js";
 import type { CallStore } from "./logging/callStore.js";
 import { type CallGate, chatCompletions } from "./routes/chatCompletions.js";
 import { vapiEvents } from "./routes/vapiEvents.js";
+import { log } from "./logger.js";
 
 type AppDeps = { vapiSecret: string; turn: TurnDeps; calls: CallStore; gate: CallGate | null };
 
@@ -37,7 +38,7 @@ export function createApp({ vapiSecret, turn, calls, gate }: AppDeps) {
   app.post("/vapi/events", requireVapi, vapiEvents(calls));
 
   app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
-    console.error(JSON.stringify({ level: "error", msg: "unhandled", err: String(err) }));
+    log.error({ err }, "unhandled");
     res.status(500).json({ error: "internal error" });
   });
 

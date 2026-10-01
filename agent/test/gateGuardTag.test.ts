@@ -16,6 +16,8 @@ describe("input gate", () => {
   it.each([
     "What fees does RelayPay charge?", "TXN-9001", "txn 9001", "amara@lagosledger.example", "yes", "no",
     "My payment is stuck.", "9001", "Can RelayPay guarantee my payout arrives by 9am tomorrow?", "OkoyeWorks",
+    // Punctuated Vapi transcripts (first live call: this was misheard as noise).
+    "Hi. I'm Jade.", "Hi. I'm Jade. Up?", "Yes. Okay. Fine.", "Jade, from Lagos.",
   ])("%j is normal", (t) => {
     expect(classifyInput(t)).toBe("normal");
   });

@@ -1,6 +1,7 @@
 import { maskEmails } from "../lib/mask.js";
 import type { DiscordSender, EmailSender } from "./senders.js";
 import type { Failure, KillSwitchChange, NotifyStore, PendingEscalation } from "./store.js";
+import { log as logger } from "../logger.js";
 
 // Delivers escalations to #escalations and the support inbox, and failures and kill-switch
 // changes to #errors (design §7.2). Delivery state is only advanced after the provider
@@ -63,7 +64,7 @@ const killSwitchLine = (k: KillSwitchChange) =>
     : `**Iris turned back on** by ${k.admin_email}${k.reason ? `. Reason: ${k.reason}` : ""}`;
 
 const log = (level: "info" | "warn" | "error", msg: string, extra: Record<string, unknown> = {}) =>
-  console.error(JSON.stringify({ level, msg, ...extra }));
+  logger[level](extra, msg);
 
 export function createNotifier(store: NotifyStore, discord: DiscordSender, email: EmailSender, cfg: NotifierConfig) {
   // The immediate delivery and the loop can reach the same escalation at once.
@@ -87,7 +88,7 @@ export function createNotifier(store: NotifyStore, discord: DiscordSender, email
         await store.markNotified(e.escalation_id);
       } catch (err) {
         await store.bumpAttempt(e.escalation_id, "discord").catch(() => {});
-        log("warn", "escalation Discord post failed, will retry", { escalation_id: e.escalation_id, err: String(err) });
+        log("warn", "escalation Discord post failed, will retry", { escalation_id: e.escalation_id, err });
       }
     }
     if (!e.emailed_at) {
@@ -96,7 +97,7 @@ export function createNotifier(store: NotifyStore, discord: DiscordSender, email
         await store.markEmailed(e.escalation_id);
       } catch (err) {
         await store.bumpAttempt(e.escalation_id, "email").catch(() => {});
-        log("warn", "escalation email failed, will retry", { escalation_id: e.escalation_id, err: String(err) });
+        log("warn", "escalation email failed, will retry", { escalation_id: e.escalation_id, err });
       }
     }
   }
@@ -144,7 +145,7 @@ export function createNotifier(store: NotifyStore, discord: DiscordSender, email
     ];
     // Each step on its own: Discord being down mustn't stop escalation emails, and vice versa.
     for (const [name, step] of steps) {
-      await step().catch((err) => log("error", `notifier ${name} step failed`, { err: String(err) }));
+      await step().catch((err) => log("error", `notifier ${name} step failed`, { err }));
     }
   }
 

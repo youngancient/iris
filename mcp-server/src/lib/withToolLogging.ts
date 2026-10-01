@@ -2,6 +2,7 @@ import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import type { ToolContext } from "../context.js";
 import type { ToolCallInsert } from "../db/types.js";
 import { maskDeep } from "./mask.js";
+import { log } from "../logger.js";
 
 export type ToolOutcome =
   | { status: "success" | "not_found"; data: Record<string, unknown>; idempotencyKey?: string }
@@ -100,7 +101,7 @@ async function logToolCall(ctx: ToolContext, row: ToolCallInsert) {
       return;
     } catch (err) {
       if (attempt === 1) {
-        console.error(JSON.stringify({ level: "error", msg: "tool_calls insert failed", err: String(err), row }));
+        log.error({ err, row }, "tool_calls insert failed");
       }
     }
   }

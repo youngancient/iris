@@ -8,6 +8,7 @@ import { createNotifier, type Notifier } from "./notify/notifier.js";
 import { createBrevoSender, createDiscordSender } from "./notify/senders.js";
 import { createSupabaseNotifyStore } from "./notify/store.js";
 import { buildServer } from "./server.js";
+import { log } from "./logger.js";
 
 // stdout is the MCP channel in stdio mode, so everything human-readable goes to stderr.
 const stdio = process.argv.includes("--stdio");
@@ -45,7 +46,7 @@ if (stdio) {
   // Local dev only: one conversation for the life of the process.
   const server = buildServer({ db, conversationId: process.env.MCP_CONVERSATION_ID?.trim() || null, turnIndex: null });
   await server.connect(new StdioServerTransport());
-  console.error("relaypay-support MCP server running on stdio");
+  log.info("relaypay-support MCP server running on stdio");
 } else {
   let notifier: Notifier | null = null;
   if (config.notify) {
@@ -70,7 +71,7 @@ if (stdio) {
     setInterval(() => void pass(), NOTIFY_INTERVAL_MS).unref();
     setTimeout(() => void pass(), 5000).unref();
   } else {
-    console.error("Notifications are off (NOTIFY=false): no Discord posts or escalation emails.");
+    log.info("Notifications are off (NOTIFY=false): no Discord posts or escalation emails.");
   }
 
   const app = createApp({
@@ -79,5 +80,5 @@ if (stdio) {
     readinessCheck: async () => void (await db.customerById("CUS-0000")),
     onEscalationCreated: notifier ? (id) => void notifier!.escalationCreated(id).catch(() => {}) : undefined,
   });
-  app.listen(config.port, () => console.error(`relaypay-support MCP server listening on :${config.port}/mcp`));
+  app.listen(config.port, () => log.info(`relaypay-support MCP server listening on :${config.port}/mcp`));
 }

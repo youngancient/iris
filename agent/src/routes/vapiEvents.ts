@@ -1,5 +1,6 @@
 import type { Request, Response } from "express";
 import { finalStatus, type CallStore } from "../logging/callStore.js";
+import { log } from "../logger.js";
 
 // Vapi server-URL events. Only the end-of-call report matters here; everything
 // else is acknowledged and ignored. Redeliveries are safe (endCall and the
@@ -31,7 +32,7 @@ export function vapiEvents(store: CallStore) {
       }
       res.json({ ok: true });
     } catch (err) {
-      console.error(JSON.stringify({ level: "error", msg: "end-of-call handling failed", conversation_id: callId, err: String(err) }));
+      log.error({ conversation_id: callId, err }, "end-of-call handling failed");
       // 500 so Vapi retries the delivery.
       res.status(500).json({ ok: false });
     }

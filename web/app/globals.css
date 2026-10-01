@@ -32,3 +32,11 @@ body {
   color: var(--foreground);
   font-family: var(--font-sans);
 }
+
+/* Tailwind v4 dropped the pointer cursor on buttons; restore it. */
+@layer base {
+  button:not(:disabled),
+  [role="button"]:not([aria-disabled="true"]) {
+    cursor: pointer;
+  }
+}

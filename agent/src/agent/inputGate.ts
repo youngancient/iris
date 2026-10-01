@@ -34,7 +34,9 @@ function wordLike(token: string): boolean {
 export function classifyInput(transcript: string): GateClass {
   const text = normalize(transcript);
   if (!text || !/[a-z0-9]/.test(text)) return "unintelligible";
-  const tokens = text.split(" ").filter(Boolean);
+  // Vapi transcripts are punctuated: "hi." and "jade," must count as words.
+  const tokens = text.split(" ").map((t) => (EMAIL.test(t) ? t : t.replace(/^[.-]+|[.-]+$/g, ""))).filter(Boolean);
+  if (tokens.length === 0) return "unintelligible";
   const wordish = tokens.filter(wordLike).length;
   if (wordish / tokens.length < 0.5) return "unintelligible";
   if (SMALL_TALK.has(text.replace(/[.-]/g, "").trim())) return "small_talk";

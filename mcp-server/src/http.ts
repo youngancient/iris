@@ -3,6 +3,7 @@ import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/
 import express, { type NextFunction, type Request, type Response } from "express";
 import type { Db } from "./db/types.js";
 import { buildServer } from "./server.js";
+import { log } from "./logger.js";
 
 type Options = { db: Db; token: string; readinessCheck?: () => Promise<void>; onEscalationCreated?: (id: string) => void };
 
@@ -54,7 +55,7 @@ export function createApp({ db, token, readinessCheck, onEscalationCreated }: Op
       await server.connect(transport);
       await transport.handleRequest(req, res, req.body);
     } catch (err) {
-      console.error(JSON.stringify({ level: "error", msg: "mcp request failed", err: String(err) }));
+      log.error({ err }, "mcp request failed");
       if (!res.headersSent) res.status(500).json({ error: "internal error" });
     }
   });

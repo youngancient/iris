@@ -7,29 +7,32 @@ import { UNINTELLIGIBLE_LIMIT_REPLY, UNINTELLIGIBLE_REPLY } from "../src/agent/i
 import type { PriorActions, TurnClaim, TurnResult, TurnStore } from "../src/logging/turnStore.js";
 
 class FakeStore implements TurnStore {
-  turns = new Map<string, { status: string; result?: Partial<TurnResult>; error?: string; updatedAt: number }>();
+  turns = new Map<string, { status: string; transcript?: string; result?: Partial<TurnResult>; error?: string; updatedAt: number }>();
   events: { type: string; metadata?: Record<string, unknown> }[] = [];
   rejected: string[] = [];
   prior: PriorActions = { identifiedCustomer: null, tickets: [], escalations: [] };
   async priorActions() {
     return this.prior;
   }
-  async claimTurn(c: string, _channel: string, i: number): Promise<TurnClaim> {
+  async claimTurn(c: string, _channel: string, i: number, transcript = ""): Promise<TurnClaim> {
     const key = `${c}:${i}`;
     const t = this.turns.get(key);
-    if (!t) {
-      this.turns.set(key, { status: "in_progress", updatedAt: Date.now() });
+    // Same rule as migration 011: a different transcript takes the turn over.
+    if (!t || t.transcript !== transcript) {
+      this.turns.set(key, { status: "in_progress", transcript, updatedAt: Date.now() });
       return { state: "claimed" };
     }
     if (t.status === "completed") return { state: "completed", response: t.result?.assistantResponse ?? "" };
     if (t.status === "in_progress") return { state: "in_progress", ageMs: Date.now() - t.updatedAt };
     return { state: "failed" };
   }
-  async completeTurn(c: string, i: number, result: TurnResult) {
-    this.turns.set(`${c}:${i}`, { status: "completed", result, updatedAt: Date.now() });
+  async completeTurn(c: string, i: number, result: TurnResult, transcript: string) {
+    if (this.turns.get(`${c}:${i}`)?.transcript !== transcript) return;
+    this.turns.set(`${c}:${i}`, { status: "completed", transcript, result, updatedAt: Date.now() });
   }
-  async failTurn(c: string, i: number, error: string, result: Partial<TurnResult>) {
-    this.turns.set(`${c}:${i}`, { status: "failed", error, result, updatedAt: Date.now() });
+  async failTurn(c: string, i: number, error: string, result: Partial<TurnResult>, transcript: string) {
+    if (this.turns.get(`${c}:${i}`)?.transcript !== transcript) return;
+    this.turns.set(`${c}:${i}`, { status: "failed", transcript, error, result, updatedAt: Date.now() });
   }
   async event(_c: string, type: string, _s: string, metadata?: Record<string, unknown>) {
     this.events.push({ type, metadata });
@@ -127,8 +130,16 @@ describe("runTurn", () => {
 
   it("a retry while the first attempt is still running gets a holding line", async () => {
     const { deps, store } = setup([result]);
-    await store.claimTurn("call-1", "web", 0);
+    await store.claimTurn("call-1", "web", 0, "What fees do you charge?");
     expect(await collect(runTurn(deps, req("What fees do you charge?")))).toEqual([HOLDING_REPLY]);
+  });
+
+  it("a longer transcript for the same turn takes it over, and the stale attempt can't overwrite it", async () => {
+    const { deps, store } = setup([{ type: "text", text: "Payouts take one to two days. [[type:answer;confidence:high]]" }, result]);
+    await store.claimTurn("call-1", "web", 0, "Hi. I'm Jade.");
+    expect(await collect(runTurn(deps, req("Hi. I'm Jade. How long do payouts take?")))).toEqual(["Payouts take one to two days."]);
+    await store.completeTurn("call-1", 0, { assistantResponse: "stale" } as TurnResult, "Hi. I'm Jade.");
+    expect(store.turns.get("call-1:0")?.result?.assistantResponse).toBe("Payouts take one to two days.");
   });
 
   it("blocks internal notes from a tool result, and logs the block without the text", async () => {

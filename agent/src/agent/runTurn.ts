@@ -12,6 +12,7 @@ import { TagStripper } from "./outcomeTag.js";
 import { formatForPrompt, type RetrievalResult, type RetrievalScope } from "./retrieval.js";
 import { checkSentence, GUARD_FALLBACK, internalSegments, SentenceSplitter, type InternalText } from "./speechGuard.js";
 import { buildTurnPrompt, PROMPT_VERSION } from "./systemPrompt.js";
+import { log } from "../logger.js";
 
 // One spoken turn (design §2). Yields sentences as they pass the speech guard.
 
@@ -65,7 +66,7 @@ async function safely(what: string, fn: () => Promise<unknown>) {
   try {
     await fn();
   } catch (err) {
-    console.error(JSON.stringify({ level: "error", msg: `${what} failed`, err: String(err) }));
+    log.error({ err }, `${what} failed`);
   }
 }
 
@@ -98,7 +99,7 @@ export async function* runTurn(deps: TurnDeps, req: TurnRequest): AsyncGenerator
   const retrieval =
     gate === "normal" && !isDataOnly(latest)
       ? deps.retrieve(latest, scope).catch((err) => {
-          console.error(JSON.stringify({ level: "error", msg: "retrieval failed", err: String(err) }));
+          log.error({ err }, "retrieval failed");
           return null;
         })
       : Promise.resolve(null);
@@ -106,7 +107,7 @@ export async function* runTurn(deps: TurnDeps, req: TurnRequest): AsyncGenerator
   // What this call already did, read in parallel with retrieval (design: stateless turns, state from our records).
   // Read on every turn, the first included: it carries who the caller is signed in as.
   const priorActions = store.priorActions(conv).catch((err) => {
-        console.error(JSON.stringify({ level: "error", msg: "priorActions failed", err: String(err) }));
+        log.error({ err }, "priorActions failed");
         return null;
       });
 
@@ -114,7 +115,7 @@ export async function* runTurn(deps: TurnDeps, req: TurnRequest): AsyncGenerator
   const spentSoFar =
     deps.spend && turnIndex > 0
       ? deps.spend.soFar(conv).catch((err) => {
-          console.error(JSON.stringify({ level: "error", msg: "spend read failed", err: String(err) }));
+          log.error({ err }, "spend read failed");
           return 0;
         })
       : Promise.resolve(0);
@@ -141,7 +142,7 @@ export async function* runTurn(deps: TurnDeps, req: TurnRequest): AsyncGenerator
       store.completeTurn(conv, turnIndex, {
         ...base, assistantResponse: COST_CAP_REPLY, answerType: "decline", confidenceNote: "cost_cap",
         retrievalUsed: false, latencyMs: now() - started, timings: { ...timings, total: now() - started },
-      }),
+      }, latest),
     );
     return;
   }
@@ -152,7 +153,7 @@ export async function* runTurn(deps: TurnDeps, req: TurnRequest): AsyncGenerator
       store.completeTurn(conv, turnIndex, {
         ...base, assistantResponse: MAINTENANCE_REPLY, answerType: "decline", confidenceNote: "maintenance",
         retrievalUsed: false, latencyMs: now() - started, timings: { ...timings, total: now() - started },
-      }),
+      }, latest),
     );
     return;
   }
@@ -165,7 +166,7 @@ export async function* runTurn(deps: TurnDeps, req: TurnRequest): AsyncGenerator
       store.completeTurn(conv, turnIndex, {
         ...base, assistantResponse: reply, answerType: "clarify", confidenceNote: "unintelligible",
         retrievalUsed: false, latencyMs: now() - started, timings: { ...timings, total: now() - started },
-      }),
+      }, latest),
     );
     return;
   }
@@ -254,7 +255,7 @@ export async function* runTurn(deps: TurnDeps, req: TurnRequest): AsyncGenerator
       if (next === "stalled") {
         stallNoticed = true;
         mark("stall_notice");
-        console.error(JSON.stringify({ level: "warn", msg: "model silent after 8s, holding", conversation_id: conv, turn_index: turnIndex }));
+        log.warn({ conversation_id: conv, turn_index: turnIndex }, "model silent after 8s, holding");
         if (spoken.length === 0) yield* speak([STALL_REPLY]);
         continue; // keep waiting on the same pending event
       }
@@ -347,10 +348,10 @@ export async function* runTurn(deps: TurnDeps, req: TurnRequest): AsyncGenerator
   };
 
   if (modelError) {
-    await safely("failTurn", () => store.failTurn(conv, turnIndex, modelError!, result));
+    await safely("failTurn", () => store.failTurn(conv, turnIndex, modelError!, result, latest));
     return;
   }
-  await safely("completeTurn", () => store.completeTurn(conv, turnIndex, result));
+  await safely("completeTurn", () => store.completeTurn(conv, turnIndex, result, latest));
   // Recorded by code from the outcome tag, so the model never spends a round-trip on it.
   const decisionEvent = outcome.answerType === "decline" ? "declined" : outcome.answerType === "clarify" ? "clarification_requested" : null;
   if (decisionEvent) {

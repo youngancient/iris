@@ -7,13 +7,14 @@ import { createVoyageEmbedder } from "./kb/voyage.js";
 import { createSupabaseCallGateStore } from "./logging/callGateStore.js";
 import { createSupabaseCallStore } from "./logging/callStore.js";
 import { createSupabaseTurnStore } from "./logging/turnStore.js";
+import { log } from "./logger.js";
 
 // Fail at startup, not on the first call, if anything required is missing.
 const config = loadOrExit(loadServerConfig);
 
 const supabase = createClient(config.supabaseUrl, config.supabaseKey, {
   auth: { persistSession: false },
-  global: { fetch: (input, init) => fetch(input, { ...init, signal: AbortSignal.timeout(4000) }) },
+  global: { fetch: (input, init) => fetch(input, { ...init, signal: AbortSignal.timeout(6000) }) },
 });
 
 const retrieve = createRetriever({
@@ -30,7 +31,7 @@ async function isMaintenance(): Promise<boolean> {
   if (Date.now() - maintenance.readAt < 10_000) return maintenance.on;
   const { data, error } = await supabase.from("app_settings").select("maintenance").eq("id", true).maybeSingle();
   if (error) {
-    console.error(JSON.stringify({ level: "warn", msg: "kill switch read failed, keeping last value", on: maintenance.on }));
+    log.warn({ on: maintenance.on }, "kill switch read failed, keeping last value");
     maintenance = { ...maintenance, readAt: Date.now() };
     return maintenance.on;
   }
@@ -62,10 +63,10 @@ async function warmUp() {
     createVoyageEmbedder(config.voyageKey, config.voyageModel)(["warm up"], "query", 5000),
   ]);
   const failed = results.filter((r) => r.status === "rejected").length;
-  console.error(JSON.stringify({ level: failed ? "warn" : "info", msg: "warm-up done", ms: Date.now() - started, failed }));
+  log[failed ? "warn" : "info"]({ ms: Date.now() - started, failed }, "warm-up done");
 }
 
 app.listen(config.port, () => {
-  console.error(`agent listening on :${config.port}`);
+  log.info(`agent listening on :${config.port}`);
   void warmUp();
 });
