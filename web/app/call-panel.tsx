@@ -13,7 +13,8 @@ type Line = { role: Role; text: string };
 
 const CONNECT_FAILED = "The call didn't connect. Check your connection and start the call again.";
 const MIC_BLOCKED = "Iris needs your microphone. Allow microphone access for this site, then start the call again.";
-const NOT_TAKEN = "Iris couldn't take the call just now. Try again in a minute.";
+const NO_AUDIO =
+  "Iris couldn't hear you, so the call didn't start. Check your microphone is selected and not used by another app, refresh the page, and try again.";
 const DROPPED = "The call dropped. Start a new call to carry on.";
 
 // Vapi nests the text at different depths depending on the source (Daily, the API, the SDK).
@@ -79,59 +80,16 @@ export function CallPanel({ signedIn, available: availableAtLoad }: { signedIn: 
   const [seconds, setSeconds] = useState(0);
   // Starts from the page's reading of the kill switch; the call-token route can turn it off later.
   const [available, setAvailable] = useState(availableAtLoad);
+  // The first attempt failed and the page is trying once more.
+  const [retrying, setRetrying] = useState(false);
 
   const setStatus = (s: Status) => {
     statusRef.current = s;
     setStatusState(s);
   };
 
-  useEffect(() => {
-    if (!PUBLIC_KEY) return;
-    const vapi = new Vapi(PUBLIC_KEY);
-    vapiRef.current = vapi;
-
-    vapi.on("call-start", () => {
-      setStatus("live");
-      setError(null);
-    });
-    vapi.on("call-end", () => {
-      setStatus(statusRef.current === "connecting" ? "idle" : "ended");
-      setSpeaking(false);
-      setVolume(0);
-      setMuted(false);
-      setPartial(null);
-    });
-    vapi.on("speech-start", () => setSpeaking(true));
-    vapi.on("speech-end", () => setSpeaking(false));
-    vapi.on("volume-level", (v: number) => setVolume(v));
-    vapi.on("message", (m: { type?: string; transcriptType?: string; role?: string; transcript?: string }) => {
-      if (m.type !== "transcript" || !m.transcript) return;
-      const line: Line = { role: m.role === "assistant" ? "iris" : "caller", text: m.transcript };
-      if (m.transcriptType === "final") {
-        setPartial(null);
-        setLines((prev) => [...prev, line]);
-      } else {
-        setPartial(line);
-      }
-    });
-    vapi.on("error", (err: unknown) => {
-      const text = errorText(err);
-      const was = statusRef.current;
-      // Vapi ending a live call is a normal hang-up; ending it before it starts is a failure.
-      if (isNormalEnd(text) && was !== "connecting") return;
-      // The page shows a friendly message; the raw one is kept for debugging.
-      console.warn("Vapi error:", err);
-      if (/permission|notallowed|microphone/i.test(text)) setError(MIC_BLOCKED);
-      else if (isNormalEnd(text)) setError(NOT_TAKEN);
-      else setError(was === "live" || was === "ending" ? DROPPED : CONNECT_FAILED);
-      setStatus(was === "live" ? "ended" : "idle");
-    });
-
-    return () => {
-      void vapi.stop();
-      vapiRef.current = null;
-    };
-  }, []);
+  // Close any call still open when the page goes away.
+  useEffect(() => () => void vapiRef.current?.stop(), []);
 
   // Call timer.
   useEffect(() => {
@@ -149,12 +107,148 @@ export function CallPanel({ signedIn, available: availableAtLoad }: { signedIn: 
   const configured = Boolean(PUBLIC_KEY && ASSISTANT_ID);
   const inCall = status === "live" || status === "ending";
 
+  /**
+   * One attempt: a fresh Vapi (and Daily) connection every time, so a failed attempt
+   * can't leave state behind for the next. Resolves when the attempt is over or live.
+   */
+  async function connect(attempt: number): Promise<void> {
+    if (!PUBLIC_KEY || !ASSISTANT_ID) return;
+    const trace = (stage: string, detail?: unknown) => console.info(`[call] attempt ${attempt}: ${stage}`, detail ?? "");
+
+    // A short-lived start token: the agent refuses web calls without one (design §8). Single use, so one per attempt.
+    trace("requesting call token");
+    const res = await fetch("/api/call-token", { method: "POST" });
+    const body = (await res.json().catch(() => ({}))) as { token?: string; error?: string; unavailable?: boolean };
+    if (body.unavailable) {
+      setStatus("idle");
+      setAvailable(false);
+      return;
+    }
+    if (!res.ok || !body.token) {
+      setStatus("idle");
+      setError(body.error ?? CONNECT_FAILED);
+      return;
+    }
+
+    const vapi = new Vapi(PUBLIC_KEY);
+    vapiRef.current = vapi;
+    const current = () => vapiRef.current === vapi;
+    // Iris speaking (or any transcript) proves audio is flowing both ways.
+    let heard = false;
+    let settled = false;
+
+    // Before Iris has said anything, a drop is a failed connection: retry once, then explain.
+    const failed = async (why: string, message: string) => {
+      if (settled || !current()) return;
+      settled = true;
+      clearTimeout(watchdog);
+      trace(`failed: ${why}`);
+      vapiRef.current = null;
+      await vapi.stop().catch(() => {});
+      if (attempt === 1) {
+        setRetrying(true);
+        return connect(2);
+      }
+      setRetrying(false);
+      setStatus("idle");
+      setError(message);
+    };
+
+    // Iris greets the caller a second or two after joining. Silence well past that means the
+    // caller's audio never reached Vapi (it hangs up itself at 15s): retry before that.
+    const watchdog = setTimeout(() => void failed("no greeting within 12s", NO_AUDIO), 12_000);
+
+    vapi.on("call-start-progress", (e: { stage: string; status: string }) => trace(`${e.stage} ${e.status}`));
+    vapi.on("call-start", () => {
+      if (!current()) return;
+      trace("joined");
+      const local = vapi.getDailyCallObject()?.participants()?.local;
+      trace("microphone track", local?.tracks?.audio?.state);
+    });
+    vapi.on("speech-start", () => {
+      if (!current()) return;
+      if (!heard) {
+        heard = true;
+        settled = true;
+        clearTimeout(watchdog);
+        trace("Iris is speaking: call is live");
+        setRetrying(false);
+        setStatus("live");
+        setError(null);
+      }
+      setSpeaking(true);
+    });
+    vapi.on("speech-end", () => current() && setSpeaking(false));
+    vapi.on("volume-level", (v: number) => current() && setVolume(v));
+    vapi.on("message", (m: { type?: string; transcriptType?: string; role?: string; transcript?: string }) => {
+      if (!current() || m.type !== "transcript" || !m.transcript) return;
+      const line: Line = { role: m.role === "assistant" ? "iris" : "caller", text: m.transcript };
+      if (m.transcriptType === "final") {
+        setPartial(null);
+        setLines((prev) => [...prev, line]);
+      } else {
+        setPartial(line);
+      }
+    });
+    vapi.on("call-end", () => {
+      if (!current()) return;
+      if (!heard) return void failed("ended before Iris spoke", NO_AUDIO);
+      trace("ended");
+      vapiRef.current = null;
+      setStatus("ended");
+      setSpeaking(false);
+      setVolume(0);
+      setMuted(false);
+      setPartial(null);
+    });
+    vapi.on("error", (err: unknown) => {
+      if (!current()) return;
+      const text = errorText(err);
+      // Vapi reports its own normal hang-up as an error: call-end handles that.
+      if (isNormalEnd(text)) return;
+      // The page shows a friendly message; the raw one is kept for debugging.
+      console.warn("Vapi error:", err);
+      if (/permission|notallowed|microphone/i.test(text)) {
+        settled = true;
+        clearTimeout(watchdog);
+        vapiRef.current = null;
+        void vapi.stop();
+        setRetrying(false);
+        setStatus("idle");
+        setError(MIC_BLOCKED);
+        return;
+      }
+      if (!heard) return void failed(`error: ${text}`, CONNECT_FAILED);
+      setError(DROPPED);
+      setStatus("ended");
+    });
+
+    try {
+      trace("starting");
+      const call = await vapi.start(ASSISTANT_ID, { metadata: { callToken: body.token } });
+      if (!call) await failed("start returned no call", CONNECT_FAILED);
+    } catch (err) {
+      console.warn("Vapi start failed:", err);
+      if (/permission|notallowed|microphone/i.test(errorText(err))) {
+        settled = true;
+        clearTimeout(watchdog);
+        vapiRef.current = null;
+        setRetrying(false);
+        setStatus("idle");
+        setError(MIC_BLOCKED);
+        return;
+      }
+      await failed("start threw", CONNECT_FAILED);
+    }
+  }
+
   async function start() {
-    if (!vapiRef.current || !ASSISTANT_ID) return;
+    if (!ASSISTANT_ID) return;
     setError(null);
     setLines([]);
     setPartial(null);
     setSeconds(0);
+    setRetrying(false);
     setStatus("connecting");
     const micProblem = await checkMicrophone();
     if (micProblem) {
@@ -163,28 +257,12 @@ export function CallPanel({ signedIn, available: availableAtLoad }: { signedIn: 
       return;
     }
     try {
-      // A short-lived start token: the agent refuses web calls without one (design §8).
-      const res = await fetch("/api/call-token", { method: "POST" });
-      const body = (await res.json().catch(() => ({}))) as { token?: string; error?: string; unavailable?: boolean };
-      if (body.unavailable) {
-        setStatus("idle");
-        setAvailable(false);
-        return;
-      }
-      if (!res.ok || !body.token) {
-        setStatus("idle");
-        setError(body.error ?? CONNECT_FAILED);
-        return;
-      }
-      const call = await vapiRef.current.start(ASSISTANT_ID, { metadata: { callToken: body.token } });
-      if (!call) {
-        setStatus("idle");
-        setError(CONNECT_FAILED);
-      }
+      await connect(1);
     } catch (err) {
-      console.warn("Vapi start failed:", err);
+      console.warn("Call setup failed:", err);
+      setRetrying(false);
       setStatus("idle");
-      setError(/permission|notallowed|microphone/i.test(errorText(err)) ? MIC_BLOCKED : CONNECT_FAILED);
+      setError(CONNECT_FAILED);
     }
   }
 
@@ -205,7 +283,9 @@ export function CallPanel({ signedIn, available: availableAtLoad }: { signedIn: 
     : !available && !inCall
       ? "Iris is unavailable right now"
     : status === "connecting"
-      ? "Connecting to Iris"
+      ? retrying
+        ? "Reconnecting to Iris"
+        : "Connecting to Iris"
       : status === "ending"
         ? "Ending the call"
         : status === "live"
