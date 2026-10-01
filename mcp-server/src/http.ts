@@ -1,6 +1,7 @@
 import { timingSafeEqual } from "node:crypto";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import express, { type NextFunction, type Request, type Response } from "express";
+import { z } from "zod";
 import type { Db } from "./db/types.js";
 import { buildServer } from "./server.js";
 import { log } from "./logger.js";
@@ -65,6 +66,19 @@ export function createApp({ db, token, readinessCheck, onEscalationCreated, onTi
       log.error({ err }, "mcp request failed");
       if (!res.headersSent) res.status(500).json({ error: "internal error" });
     }
+  });
+
+  // The agent reports its own failed database writes here, so it never needs the Discord
+  // token: this server posts them to #errors through the same outage alert (design §7.2).
+  const DbAlert = z.object({ what: z.string().min(1).max(100), error: z.string().max(500) });
+  app.post("/internal/db-alert", requireToken, (req, res) => {
+    const parsed = DbAlert.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: "invalid request" });
+      return;
+    }
+    onRecordFailed?.(`agent: ${parsed.data.what}`, new Error(parsed.data.error));
+    res.status(202).json({ ok: true });
   });
 
   // Stateless mode: no sessions to resume or delete.

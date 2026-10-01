@@ -38,7 +38,7 @@ describe("outage alert (database writes failing)", () => {
     expect(posts).toHaveLength(1);
     await vi.advanceTimersByTimeAsync(30_000);
     expect(posts).toHaveLength(2);
-    expect(posts[1].content).toContain("5 tool calls");
+    expect(posts[1].content).toContain("5 writes");
     expect(posts[1].content).toContain("lookup_payout");
     expect(posts[1].content).toContain("create_support_ticket");
   });

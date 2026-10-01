@@ -15,7 +15,7 @@ export type ToolContext = {
   onEscalationCreated?: (escalationId: string) => void;
   /** Same for tickets. Called for every successful create; already-delivered tickets are skipped. */
   onTicketCreated?: (ticketId: string) => void;
-  /** A tool_calls row couldn't be written (the database is failing): alert outside the database. */
+  /** A record couldn't be written (the database is failing): alert outside the database. */
   onRecordFailed?: (tool: string, err: unknown) => void;
 };
 

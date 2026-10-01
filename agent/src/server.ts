@@ -7,6 +7,7 @@ import { createVoyageEmbedder } from "./kb/voyage.js";
 import { createSupabaseCallGateStore } from "./logging/callGateStore.js";
 import { createSupabaseCallStore } from "./logging/callStore.js";
 import { createSupabaseTurnStore } from "./logging/turnStore.js";
+import { alertOnWriteFailure, createDbAlert } from "./logging/dbAlert.js";
 import { log } from "./logger.js";
 
 // Fail at startup, not on the first call, if anything required is missing.
@@ -17,9 +18,12 @@ const supabase = createClient(config.supabaseUrl, config.supabaseKey, {
   global: { fetch: (input, init) => fetch(input, { ...init, signal: AbortSignal.timeout(6000) }) },
 });
 
+// Failed database writes are reported to the MCP server, which posts them to #errors.
+const dbAlert = createDbAlert(config.mcpUrl, config.mcpToken);
+
 const retrieve = createRetriever({
   embed: createVoyageEmbedder(config.voyageKey, config.voyageModel),
-  ...supabaseSearch(supabase),
+  ...alertOnWriteFailure(supabaseSearch(supabase), ["log"], dbAlert),
   similarityThreshold: config.similarityThreshold,
   embedTimeoutMs: config.embedTimeoutMs,
 });
@@ -39,19 +43,19 @@ async function isMaintenance(): Promise<boolean> {
   return maintenance.on;
 }
 
-const callGate = createSupabaseCallGateStore(supabase);
+const callGate = alertOnWriteFailure(createSupabaseCallGateStore(supabase), ["claimNonce", "event"], dbAlert);
 
 const app = createApp({
   vapiSecret: config.vapiSecret,
   turn: {
-    store: createSupabaseTurnStore(supabase),
+    store: alertOnWriteFailure(createSupabaseTurnStore(supabase), ["claimTurn", "completeTurn", "failTurn", "event", "toolCallRejected"], dbAlert),
     runModel: createAgentSdkRunner({ model: config.agentModel, mcpUrl: config.mcpUrl, mcpToken: config.mcpToken }),
     retrieve,
     model: config.agentModel,
     maintenance: isMaintenance,
     spend: { soFar: (id) => callGate.spentSoFar(id), capUsd: config.callSpendCapUsd },
   },
-  calls: createSupabaseCallStore(supabase),
+  calls: alertOnWriteFailure(createSupabaseCallStore(supabase), ["endCall", "event"], dbAlert),
   gate: { store: callGate, tokenSecret: config.callTokenSecret },
 });
 
