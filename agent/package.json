@@ -11,7 +11,8 @@
     "ingest-kb": "tsx --env-file=../.env scripts/ingest-kb.ts",
     "evals": "tsx --env-file=../.env scripts/run-evals.ts",
     "test": "vitest run",
-    "evidence": "tsx --env-file=../.env scripts/export-evidence.ts"
+    "evidence": "tsx --env-file=../.env scripts/export-evidence.ts",
+    "vapi:sync": "tsx --env-file=../.env scripts/vapi-sync.ts"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.3.285",

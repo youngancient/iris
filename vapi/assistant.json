@@ -1,0 +1,18 @@
+{
+  "name": "Iris (RelayPay support)",
+  "firstMessage": "Hi, I'm Iris from RelayPay support. How can I help you today?",
+  "firstMessageMode": "assistant-speaks-first",
+  "endCallMessage": "Thanks for calling RelayPay. Goodbye.",
+  "maxDurationSeconds": 600,
+  "model": {
+    "provider": "custom-llm",
+    "model": "iris",
+    "url": "${AGENT_URL}",
+    "timeoutSeconds": 30
+  },
+  "server": {
+    "url": "${AGENT_URL}/vapi/events",
+    "timeoutSeconds": 20
+  },
+  "serverMessages": ["end-of-call-report"]
+}

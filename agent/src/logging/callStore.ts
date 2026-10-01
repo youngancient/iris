@@ -7,7 +7,10 @@ export type CallSummary = { tickets: number; escalations: number; turns: number;
 export interface CallStore {
   summarize(conversationId: string): Promise<CallSummary>;
   /** Idempotent: ended_at is only set the first time. */
-  endCall(conversationId: string, fields: { summary: string | null; finalStatus: string; callerId: string; costUsd: number | null }): Promise<void>;
+  endCall(
+    conversationId: string,
+    fields: { summary: string | null; finalStatus: string; callerId: string; costUsd: number | null; durationS: number | null },
+  ): Promise<void>;
   event(conversationId: string, eventType: string, summary: string, metadata?: Record<string, unknown>): Promise<void>;
   hasEvent(conversationId: string, eventType: string): Promise<boolean>;
 }
@@ -34,14 +37,17 @@ export function createSupabaseCallStore(supabase: SupabaseClient): CallStore {
       return { tickets, escalations, turns, followUpSeen: followUps > 0, identifiedCustomer: convo.data?.identified_customer_id ?? null };
     },
 
-    async endCall(conversationId, { summary, finalStatus, callerId }) {
+    async endCall(conversationId, { summary, finalStatus, callerId, costUsd, durationS }) {
       const { error } = await supabase
         .from("conversations")
         .upsert({ conversation_id: conversationId, channel: "web" }, { onConflict: "conversation_id", ignoreDuplicates: true });
       if (error) throw new Error(`conversations: ${error.message}`);
       const { error: updateError } = await supabase
         .from("conversations")
-        .update({ ended_at: new Date().toISOString(), summary, final_status: finalStatus, caller_id: callerId })
+        .update({
+          ended_at: new Date().toISOString(), summary, final_status: finalStatus, caller_id: callerId,
+          vapi_cost_usd: costUsd, duration_s: durationS === null ? null : Math.round(durationS),
+        })
         .eq("conversation_id", conversationId)
         .is("ended_at", null);
       if (updateError) throw new Error(`conversations: ${updateError.message}`);

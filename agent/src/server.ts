@@ -22,6 +22,21 @@ const retrieve = createRetriever({
   embedTimeoutMs: config.embedTimeoutMs,
 });
 
+// Kill switch, read at most every 10s (design §15). If the read fails, the last known
+// value stands: a database blip shouldn't flip Iris on or off.
+let maintenance = { on: false, readAt: 0 };
+async function isMaintenance(): Promise<boolean> {
+  if (Date.now() - maintenance.readAt < 10_000) return maintenance.on;
+  const { data, error } = await supabase.from("app_settings").select("maintenance").eq("id", true).maybeSingle();
+  if (error) {
+    console.error(JSON.stringify({ level: "warn", msg: "kill switch read failed, keeping last value", on: maintenance.on }));
+    maintenance = { ...maintenance, readAt: Date.now() };
+    return maintenance.on;
+  }
+  maintenance = { on: Boolean(data?.maintenance), readAt: Date.now() };
+  return maintenance.on;
+}
+
 const app = createApp({
   vapiSecret: config.vapiSecret,
   turn: {
@@ -29,6 +44,7 @@ const app = createApp({
     runModel: createAgentSdkRunner({ model: config.agentModel, mcpUrl: config.mcpUrl, mcpToken: config.mcpToken }),
     retrieve,
     model: config.agentModel,
+    maintenance: isMaintenance,
   },
   calls: createSupabaseCallStore(supabase),
 });

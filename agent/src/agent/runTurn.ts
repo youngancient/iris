@@ -20,6 +20,7 @@ export const FAILURE_REPLY =
   "I'm having trouble right now. Please try again in a few minutes, or contact support from your RelayPay dashboard.";
 export const LOOKUP_ACK = "Let me check that for you.";
 export const STALL_REPLY = "Sorry, just a moment.";
+export const MAINTENANCE_REPLY = "Support is temporarily unavailable. Please use your RelayPay dashboard.";
 
 // No model activity after 8s: say a holding line and keep waiting (occasionally the
 // SDK is slow to start; giving up there would fail a turn that was about to succeed).
@@ -40,6 +41,8 @@ export type TurnDeps = {
   runModel: ModelRunner;
   retrieve: (query: string, scope: RetrievalScope) => Promise<RetrievalResult>;
   model: string;
+  /** The dashboard's kill switch (app_settings.maintenance). When on, the model is never called. */
+  maintenance?: () => Promise<boolean>;
   now?: () => number;
 };
 
@@ -115,6 +118,17 @@ export async function* runTurn(deps: TurnDeps, req: TurnRequest): AsyncGenerator
   }
 
   const base = { model: null, promptVersion: null, costUsd: null, inputTokens: null, outputTokens: null, cacheReadTokens: null };
+
+  if (deps.maintenance && (await deps.maintenance())) {
+    yield MAINTENANCE_REPLY;
+    await safely("completeTurn", () =>
+      store.completeTurn(conv, turnIndex, {
+        ...base, assistantResponse: MAINTENANCE_REPLY, answerType: "decline", confidenceNote: "maintenance",
+        retrievalUsed: false, latencyMs: now() - started, timings: { ...timings, total: now() - started },
+      }),
+    );
+    return;
+  }
 
   if (gate === "unintelligible") {
     const priorCount = priorUnintelligibleCount(prior.filter((m) => m.role === "assistant").map((m) => m.content));

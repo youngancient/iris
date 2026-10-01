@@ -20,7 +20,9 @@ export function vapiEvents(store: CallStore) {
         finalStatus: finalStatus(summary),
         // Web calls have no phone number: the identified customer, else the call ID (design §2 step 7).
         callerId: summary.identifiedCustomer ?? callId,
+        // Field names checked against a real report in step 6; anything non-numeric is left empty.
         costUsd: typeof message.cost === "number" ? message.cost : null,
+        durationS: typeof message.durationSeconds === "number" ? message.durationSeconds : null,
       });
 
       // A record needing follow-up was seen, but no ticket was created (design §4.4).

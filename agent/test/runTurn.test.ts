@@ -264,4 +264,12 @@ describe("runTurn", () => {
     expect(prompts[0]).toContain("Escalation ESC-1 created (turn 2)");
     expect(prompts[0]).toContain("verified as customer CUS-1003");
   });
+
+  it("kill switch on: the fixed unavailable line, and the model is never called", async () => {
+    const { deps, prompts, store } = setup([{ type: "text", text: "Hello. [[type:answer;confidence:high]]" }, result]);
+    const out = await collect(runTurn({ ...deps, maintenance: async () => true }, req("What fees do you charge?")));
+    expect(out).toEqual(["Support is temporarily unavailable. Please use your RelayPay dashboard."]);
+    expect(prompts).toHaveLength(0);
+    expect(store.turns.get("call-1:0")?.result).toMatchObject({ confidenceNote: "maintenance" });
+  });
 });
