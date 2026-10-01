@@ -20,6 +20,12 @@ export function describeFailure(kind: string, source: string): { text: string; s
       return { severity: "grey", text: "Iris tried to repeat internal notes. The sentence was held back, so the caller didn't hear it." };
     case "guarantee_blocked":
       return { severity: "grey", text: "Iris tried to promise an outcome. The sentence was held back, so the caller didn't hear it." };
+    case "identity_attempts_exceeded":
+      return { severity: "amber", text: "Someone failed to verify several times, so verification was closed. It may be a forgetful caller, or someone guessing at an account." };
+    case "identity_switch_blocked":
+      return { severity: "amber", text: "A caller already verified as one customer tried to verify as another. Iris refused." };
+    case "lookup_rate_limited":
+      return { severity: "amber", text: "An unverified caller looked up many payments in one call. Further lookups were refused, in case someone was guessing references." };
     case "conversation_id_mismatch":
       return { severity: "grey", text: "A tool call used the wrong call reference. It was corrected automatically." };
     default:

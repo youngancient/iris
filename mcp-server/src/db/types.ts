@@ -104,5 +104,9 @@ export interface Db {
   insertEscalation(row: EscalationInsert): Promise<{ escalation_id: string; status: string; created: boolean }>;
 
   insertEvent(row: EventInsert): Promise<void>;
+  /** Events of a type in one conversation (limits are counted from these, design §5.2). */
+  countEvents(conversationId: string, eventType: string): Promise<number>;
+  /** Events of a type recorded against a customer (metadata.customer_id) since a time, across calls. */
+  countCustomerEvents(eventType: string, customerId: string, sinceIso: string): Promise<number>;
   insertToolCall(row: ToolCallInsert): Promise<void>;
 }

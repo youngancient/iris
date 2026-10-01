@@ -24,7 +24,7 @@ export class MemoryDb implements Db {
   conversations = new Map<string, { identified_customer_id: string | null }>();
   tickets: (TicketInsert & { ticket_id: string; status: string; created_at: string })[] = [];
   escalations: (EscalationInsert & { escalation_id: string; status: string })[] = [];
-  events: EventInsert[] = [];
+  events: (EventInsert & { created_at?: string })[] = [];
   toolCalls: ToolCallInsert[] = [];
   /** Set to make every call fail, simulating the database being down. */
   failing = false;
@@ -117,7 +117,17 @@ export class MemoryDb implements Db {
   }
   async insertEvent(row: EventInsert) {
     this.guard();
-    this.events.push(row);
+    this.events.push({ ...row, created_at: new Date().toISOString() });
+  }
+  async countEvents(conversationId: string, eventType: string) {
+    this.guard();
+    return this.events.filter((e) => e.conversation_id === conversationId && e.event_type === eventType).length;
+  }
+  async countCustomerEvents(eventType: string, customerId: string, sinceIso: string) {
+    this.guard();
+    return this.events.filter(
+      (e) => e.event_type === eventType && e.metadata.customer_id === customerId && (e.created_at ?? new Date().toISOString()) >= sinceIso,
+    ).length;
   }
   async insertToolCall(row: ToolCallInsert) {
     this.guard();

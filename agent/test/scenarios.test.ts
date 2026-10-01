@@ -8,7 +8,7 @@ describe("eval scenarios", () => {
   it("cover PRD scenarios 1–8 plus the adversarial cases, with unique IDs", () => {
     const ids = SCENARIOS.map((s) => s.id);
     expect(new Set(ids).size).toBe(ids.length);
-    for (const id of ["S1", "S2", "S3", "S4", "S5", "S6", "S7", "S8", "A1", "A2", "A3", "A4", "A5"]) expect(ids).toContain(id);
+    for (const id of ["S1", "S2", "S3", "S4", "S5", "S6", "S7", "S8", "A1", "A2", "A3", "A4", "A5", "A6", "A7", "A8"]) expect(ids).toContain(id);
   });
 
   it.each(SCENARIOS.map((s) => [s.id, s] as const))("%s checks run on empty artifacts without throwing", (_id, s) => {

@@ -31,7 +31,14 @@ const EVENT_LABELS: Record<string, string> = {
   follow_up_status_seen: "A record needs specialist follow-up",
   conversation_id_mismatch: "A tool call used the wrong call reference (ignored)",
   identity_check_failed: "Caller's details didn't match",
+  identity_attempt_failed: "Caller's details didn't match",
+  identity_attempts_exceeded: "Verification closed after too many failed attempts",
+  identity_switch_blocked: "Caller tried to verify as a second customer (blocked)",
+  lookup_rate_limited: "Too many lookups without verification (blocked)",
 };
+
+/** Bookkeeping events that aren't worth showing in a transcript. */
+export const HIDDEN_EVENTS = new Set(["anonymous_lookup", "escalation_created", "follow_up_status_seen"]);
 
 export function eventLabel(type: string): string {
   return EVENT_LABELS[type] ?? type.replace(/_/g, " ");

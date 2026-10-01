@@ -3,6 +3,7 @@ import { z } from "zod";
 import type { ToolContext } from "../context.js";
 import { normalizeRef, present } from "../lib/normalize.js";
 import { withToolLogging } from "../lib/withToolLogging.js";
+import { anonymousLookupOverLimit } from "./limits.js";
 import { accessFrom, identifiedFor } from "./ownership.js";
 
 const description =
@@ -48,6 +49,7 @@ export function register(server: McpServer, ctx: ToolContext) {
         if (!txn) return { status: "not_found", data: notFound };
 
         const access = accessFrom(identified, txn.customer_id);
+        if (access === "anonymous" && (await anonymousLookupOverLimit(ctx))) return { status: "not_found", data: notFound };
         // Don't reveal that another customer's record exists.
         if (access === "other_customer") return { status: "not_found", data: notFound };
 

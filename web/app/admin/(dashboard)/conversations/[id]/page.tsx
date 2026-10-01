@@ -2,7 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { verifyAdmin } from "@/lib/dal";
 import { dateTime, money, seconds } from "@/lib/format";
-import { ANSWER_LABEL, eventLabel, OUTCOME_LABEL, toolLabel } from "@/lib/labels";
+import { ANSWER_LABEL, eventLabel, HIDDEN_EVENTS, OUTCOME_LABEL, toolLabel } from "@/lib/labels";
 import { adminDb } from "@/lib/supabase";
 
 type Entry =
@@ -43,10 +43,10 @@ export default async function ConversationPage({ params }: { params: Promise<{ i
         text: toolLabel(t.tool_name as string, t.input_summary as Row | null, t.result_summary as Row | null, t.status as string),
       })),
     ...((events.data ?? []) as unknown as Row[])
-      .filter((e) => !["escalation_created", "follow_up_status_seen"].includes(e.event_type as string))
+      .filter((e) => !HIDDEN_EVENTS.has(e.event_type as string))
       .map((e) => ({
         at: e.created_at as string, kind: "note" as const,
-        tone: /blocked|missed|unavailable|error|ungrounded/.test(e.event_type as string) ? ("warn" as const) : ("info" as const),
+        tone: /blocked|missed|unavailable|error|ungrounded|exceeded|limited|failed/.test(e.event_type as string) ? ("warn" as const) : ("info" as const),
         text: eventLabel(e.event_type as string),
       })),
     ...((retrievals.data ?? []) as unknown as Row[]).map((r) => ({

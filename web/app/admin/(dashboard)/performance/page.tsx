@@ -13,6 +13,9 @@ const SAFETY_EVENTS: Record<string, string> = {
   missed_followup: "Missed a follow-up ticket (flagged)",
   tool_error_seen: "A lookup or action failed",
   mcp_unavailable: "Couldn't reach customer records",
+  identity_attempts_exceeded: "Closed verification after too many failed attempts",
+  identity_switch_blocked: "Blocked a caller verifying as a second customer",
+  lookup_rate_limited: "Blocked a run of lookups without verification",
 };
 
 function percentile(sorted: number[], p: number): number | null {

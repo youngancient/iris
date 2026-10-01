@@ -4,6 +4,7 @@ import type { ToolContext } from "../context.js";
 import type { PayoutRow } from "../db/types.js";
 import { normalizeRef, present } from "../lib/normalize.js";
 import { withToolLogging } from "../lib/withToolLogging.js";
+import { anonymousLookupOverLimit } from "./limits.js";
 import { accessFrom, identifiedFor } from "./ownership.js";
 
 const description =
@@ -64,9 +65,9 @@ export function register(server: McpServer, ctx: ToolContext) {
           identifiedPromise,
           payout.transaction_id ? ctx.db.transactionById(payout.transaction_id) : Promise.resolve(null),
         ]);
-        if (accessFrom(identified, payout.customer_id) === "other_customer") {
-          return { status: "not_found", data: notFound };
-        }
+        const access = accessFrom(identified, payout.customer_id);
+        if (access === "other_customer") return { status: "not_found", data: notFound };
+        if (access === "anonymous" && (await anonymousLookupOverLimit(ctx))) return { status: "not_found", data: notFound };
         const status = payout.status ?? "";
         return {
           status: "success",
