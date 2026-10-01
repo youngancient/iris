@@ -27,12 +27,14 @@ class FakeStore implements TurnStore {
     return { state: "failed" };
   }
   async completeTurn(c: string, i: number, result: TurnResult, transcript: string) {
-    if (this.turns.get(`${c}:${i}`)?.transcript !== transcript) return;
+    if (this.turns.get(`${c}:${i}`)?.transcript !== transcript) return false;
     this.turns.set(`${c}:${i}`, { status: "completed", transcript, result, updatedAt: Date.now() });
+    return true;
   }
   async failTurn(c: string, i: number, error: string, result: Partial<TurnResult>, transcript: string) {
-    if (this.turns.get(`${c}:${i}`)?.transcript !== transcript) return;
+    if (this.turns.get(`${c}:${i}`)?.transcript !== transcript) return false;
     this.turns.set(`${c}:${i}`, { status: "failed", transcript, error, result, updatedAt: Date.now() });
+    return true;
   }
   async event(_c: string, type: string, _s: string, metadata?: Record<string, unknown>) {
     this.events.push({ type, metadata });
@@ -140,6 +142,38 @@ describe("runTurn", () => {
     expect(await collect(runTurn(deps, req("Hi. I'm Jade. How long do payouts take?")))).toEqual(["Payouts take one to two days."]);
     await store.completeTurn("call-1", 0, { assistantResponse: "stale" } as TurnResult, "Hi. I'm Jade.");
     expect(store.turns.get("call-1:0")?.result?.assistantResponse).toBe("Payouts take one to two days.");
+  });
+
+  it("an attempt taken over mid-turn logs no events", async () => {
+    const { deps, store } = setup(async function* () {
+      // A newer attempt claims the turn while this one is still answering.
+      await store.claimTurn("call-1", "web", 0, "Tell me a joke. Actually, never mind.");
+      yield { type: "text", text: "I can't help with that. [[type:decline;confidence:high]]" };
+      yield result;
+    });
+    await collect(runTurn(deps, req("Tell me a joke.")));
+    expect(store.events.map((e) => e.type)).not.toContain("declined");
+  });
+
+  it("stops and stays silent when Vapi cancels the request", async () => {
+    const cancel = new AbortController();
+    const { deps, store } = setup(async function* () {
+      cancel.abort();
+      await new Promise((r) => setTimeout(r, 10));
+      yield { type: "text", text: "Too late. [[type:answer;confidence:high]]" };
+      yield result;
+    });
+    const spoken = await collect(runTurn(deps, { ...req("What fees do you charge?"), signal: cancel.signal }));
+    expect(spoken).toEqual([]);
+    expect(store.events).toEqual([]);
+    expect(store.turns.get("call-1:0")?.status).toBe("in_progress");
+  });
+
+  it("a social reply (thanks, goodbye) is never flagged as ungrounded", async () => {
+    const { deps, store } = setup([{ type: "text", text: "You're welcome, take care. [[type:social;confidence:high]]" }, result], { chunks: [], matched: false, method: "vector", topScore: 0.17 });
+    expect(await collect(runTurn(deps, req("Cool. I think I'm done. Thank you.")))).toEqual(["You're welcome, take care."]);
+    expect(store.events.map((e) => e.type)).not.toContain("ungrounded_answer");
+    expect(store.turns.get("call-1:0")?.result?.answerType).toBe("social");
   });
 
   it("blocks internal notes from a tool result, and logs the block without the text", async () => {

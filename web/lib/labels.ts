@@ -59,4 +59,5 @@ export const ANSWER_LABEL: Record<string, string> = {
   clarify: "Asked a question",
   escalate: "Escalated",
   decline: "Declined",
+  social: "Small talk",
 };

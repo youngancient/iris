@@ -13,15 +13,55 @@ type Line = { role: Role; text: string };
 
 const CONNECT_FAILED = "The call didn't connect. Check your connection and start the call again.";
 const MIC_BLOCKED = "Iris needs your microphone. Allow microphone access for this site, then start the call again.";
+const NOT_TAKEN = "Iris couldn't take the call just now. Try again in a minute.";
 const DROPPED = "The call dropped. Start a new call to carry on.";
 
+// Vapi nests the text at different depths depending on the source (Daily, the API, the SDK).
 function errorText(err: unknown): string {
-  const e = err as { error?: { message?: string; msg?: string }; errorMsg?: string; message?: string };
-  return String(e?.error?.message ?? e?.error?.msg ?? e?.errorMsg ?? e?.message ?? err);
+  const e = err as { error?: { errorMsg?: unknown; msg?: unknown; message?: unknown }; errorMsg?: unknown; message?: unknown };
+  const found = [e?.error?.errorMsg, e?.error?.msg, e?.error?.message, e?.errorMsg, e?.message].find((v) => typeof v === "string");
+  return typeof found === "string" ? found : String(err);
 }
 
 // Vapi reports its own normal hang-up ("meeting has ended", ejection) as an error event.
 const isNormalEnd = (text: string) => /meeting (has )?ended|ejected|ejection/i.test(text);
+
+const NO_MIC = "No microphone found. Connect one, then start the call again.";
+const MIC_BUSY = "Your microphone is in use by another app or tab. Close it, then start the call again.";
+const MIC_SILENT = "We can't hear your microphone. Check it's connected, unmuted and selected in your browser, then try again.";
+
+/**
+ * Checks the microphone before the call: Vapi hangs up after 0s if no audio arrives.
+ * A working mic always picks up some background noise; a dead, muted or wrong device sends exact zeros.
+ * Returns an error message, or null when the mic is sending audio.
+ */
+async function checkMicrophone(): Promise<string | null> {
+  let stream: MediaStream;
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  } catch (err) {
+    const name = (err as DOMException)?.name;
+    if (name === "NotFoundError" || name === "OverconstrainedError") return NO_MIC;
+    if (name === "NotReadableError" || name === "AbortError") return MIC_BUSY;
+    return MIC_BLOCKED;
+  }
+  const ctx = new AudioContext();
+  try {
+    const analyser = ctx.createAnalyser();
+    ctx.createMediaStreamSource(stream).connect(analyser);
+    const samples = new Float32Array(analyser.fftSize);
+    const deadline = Date.now() + 1500;
+    while (Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 100));
+      analyser.getFloatTimeDomainData(samples);
+      if (samples.some((v) => v !== 0)) return null;
+    }
+    return MIC_SILENT;
+  } finally {
+    stream.getTracks().forEach((t) => t.stop());
+    void ctx.close();
+  }
+}
 
 const clock = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
 
@@ -74,9 +114,13 @@ export function CallPanel({ signedIn }: { signedIn: boolean }) {
     });
     vapi.on("error", (err: unknown) => {
       const text = errorText(err);
-      if (isNormalEnd(text)) return;
       const was = statusRef.current;
+      // Vapi ending a live call is a normal hang-up; ending it before it starts is a failure.
+      if (isNormalEnd(text) && was !== "connecting") return;
+      // The page shows a friendly message; the raw one is kept for debugging.
+      console.warn("Vapi error:", err);
       if (/permission|notallowed|microphone/i.test(text)) setError(MIC_BLOCKED);
+      else if (isNormalEnd(text)) setError(NOT_TAKEN);
       else setError(was === "live" || was === "ending" ? DROPPED : CONNECT_FAILED);
       setStatus(was === "live" ? "ended" : "idle");
     });
@@ -110,6 +154,12 @@ export function CallPanel({ signedIn }: { signedIn: boolean }) {
     setPartial(null);
     setSeconds(0);
     setStatus("connecting");
+    const micProblem = await checkMicrophone();
+    if (micProblem) {
+      setStatus("idle");
+      setError(micProblem);
+      return;
+    }
     try {
       // A short-lived start token: the agent refuses web calls without one (design §8).
       const res = await fetch("/api/call-token", { method: "POST" });
@@ -125,6 +175,7 @@ export function CallPanel({ signedIn }: { signedIn: boolean }) {
         setError(CONNECT_FAILED);
       }
     } catch (err) {
+      console.warn("Vapi start failed:", err);
       setStatus("idle");
       setError(/permission|notallowed|microphone/i.test(errorText(err)) ? MIC_BLOCKED : CONNECT_FAILED);
     }

@@ -40,7 +40,7 @@ export function createBrevoSender(apiKey: string, senderEmail: string): EmailSen
         to: [{ email: to }],
         subject,
         textContent: text,
-        tags: ["iris-escalation"],
+        tags: [idempotencyKey.startsWith("ticket-") ? "iris-ticket" : "iris-escalation"],
       }),
       signal: AbortSignal.timeout(10_000),
     });

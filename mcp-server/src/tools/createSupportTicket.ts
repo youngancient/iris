@@ -87,6 +87,7 @@ export function register(server: McpServer, ctx: ToolContext) {
           });
         }
 
+        ctx.onTicketCreated?.(ticket.ticket_id);
         return { status: "success", data: { ticket_id: ticket.ticket_id, status: ticket.status }, idempotencyKey };
       },
     ),

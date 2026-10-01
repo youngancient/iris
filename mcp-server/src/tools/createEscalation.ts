@@ -3,6 +3,7 @@ import { z } from "zod";
 import type { ToolContext } from "../context.js";
 import { EMAIL_PATTERN, normalizeEmail, normalizeEscalationCategory, present } from "../lib/normalize.js";
 import { withToolLogging } from "../lib/withToolLogging.js";
+import { log } from "../logger.js";
 
 const description =
   "Use this tool when the request requires human support: compliance, disputes, account restrictions, refunds, " +
@@ -76,12 +77,15 @@ export function register(server: McpServer, ctx: ToolContext) {
         // Written by the server itself, so it never depends on the model calling log_conversation_event.
         if (escalation.created) {
           ctx.onEscalationCreated?.(escalation.escalation_id);
-          await ctx.db.insertEvent({
-            conversation_id: conversationId,
-            event_type: "escalation_created",
-            summary: `Escalated (${category}): ${input.reason.trim()}`,
-            metadata: { escalation_id: escalation.escalation_id, ticket_id: ticketId, call_booked: Boolean(preferredTime) },
-          });
+          // The escalation is saved: a failed event write is logged, never reported as a failed escalation.
+          await ctx.db
+            .insertEvent({
+              conversation_id: conversationId,
+              event_type: "escalation_created",
+              summary: `Escalated (${category}): ${input.reason.trim()}`,
+              metadata: { escalation_id: escalation.escalation_id, ticket_id: ticketId, call_booked: Boolean(preferredTime) },
+            })
+            .catch((err) => log.error({ escalation_id: escalation.escalation_id, conversation_id: conversationId, err }, "escalation_created event failed"));
         }
 
         return {

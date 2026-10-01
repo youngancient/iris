@@ -49,7 +49,14 @@ export function chatCompletions(deps: TurnDeps, gate: CallGate | null) {
     res.setHeader("Connection", "keep-alive");
     res.flushHeaders();
 
+    // Vapi closes the request when the caller keeps talking, then re-sends the turn.
+    const cancelled = new AbortController();
+    res.on("close", () => {
+      if (!res.writableFinished) cancelled.abort();
+    });
+
     const send = (content: string | null, finish: "stop" | null = null) =>
+      !res.destroyed &&
       res.write(
         `data: ${JSON.stringify({
           id,
@@ -74,7 +81,7 @@ export function chatCompletions(deps: TurnDeps, gate: CallGate | null) {
           return;
         }
       }
-      for await (const sentence of runTurn(deps, { conversationId: call.id, channel: "web", messages })) {
+      for await (const sentence of runTurn(deps, { conversationId: call.id, channel: "web", messages, signal: cancelled.signal })) {
         send(`${sentence} `);
         spokeAnything = true;
       }
@@ -82,6 +89,7 @@ export function chatCompletions(deps: TurnDeps, gate: CallGate | null) {
       log.error({ conversation_id: call.id, err }, "turn failed");
       if (!spokeAnything) send(FAILURE_REPLY);
     }
+    if (res.destroyed) return;
     send(null, "stop");
     res.write("data: [DONE]\n\n");
     res.end();

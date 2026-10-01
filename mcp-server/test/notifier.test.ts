@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { createNotifier } from "../src/notify/notifier.js";
-import type { Failure, KillSwitchChange, NotifyStore, PendingEscalation } from "../src/notify/store.js";
+import type { Failure, KillSwitchChange, NotifyStore, PendingEscalation, PendingTicket } from "../src/notify/store.js";
 
-const cfg = { errorsChannelId: "ERR", escalationsChannelId: "ESC", supportEmail: "team@relaypay.example", dashboardUrl: "https://iris.example" };
+const cfg = { errorsChannelId: "ERR", escalationsChannelId: "ESC", ticketsChannelId: "TKT", supportEmail: "team@relaypay.example", dashboardUrl: "https://iris.example" };
 
 function escalation(id: string, over: Partial<PendingEscalation> = {}): PendingEscalation {
   return {
@@ -12,8 +12,18 @@ function escalation(id: string, over: Partial<PendingEscalation> = {}): PendingE
   };
 }
 
+function ticket(id: string, over: Partial<PendingTicket> = {}): PendingTicket {
+  return {
+    ticket_id: id, conversation_id: "call-1", customer_id: null, transaction_id: "TXN-9001", category: "payout", priority: "medium",
+    summary: "Caller Jude (jude@okoyeworks.example) reports a stuck payout, TXN-9001.",
+    created_at: new Date().toISOString(), notified_at: null, emailed_at: null, undelivered_alerted_at: null, ...over,
+  };
+}
+
 function setup() {
   const escalations = new Map<string, PendingEscalation>();
+  const tickets = new Map<string, PendingTicket>();
+  const rec = (kind: "escalation" | "ticket", id: string) => (kind === "escalation" ? escalations.get(id)! : tickets.get(id)!);
   const cursor = { lastFailureAt: null as string | null, lastAdminActionAt: null as string | null };
   const failures: Failure[] = [];
   const changes: KillSwitchChange[] = [];
@@ -21,10 +31,12 @@ function setup() {
   const store: NotifyStore = {
     pendingEscalations: async () => [...escalations.values()].filter((e) => !e.notified_at || !e.emailed_at),
     escalation: async (id) => escalations.get(id) ?? null,
-    markNotified: async (id) => void (escalations.get(id)!.notified_at = new Date().toISOString()),
-    markEmailed: async (id) => void (escalations.get(id)!.emailed_at = new Date().toISOString()),
+    pendingTickets: async () => [...tickets.values()].filter((t) => !t.notified_at || !t.emailed_at),
+    ticket: async (id) => tickets.get(id) ?? null,
+    markNotified: async (kind, id) => void (rec(kind, id).notified_at = new Date().toISOString()),
+    markEmailed: async (kind, id) => void (rec(kind, id).emailed_at = new Date().toISOString()),
     bumpAttempt: async () => {},
-    markUndeliveredAlerted: async (id) => void (escalations.get(id)!.undelivered_alerted_at = new Date().toISOString()),
+    markUndeliveredAlerted: async (kind, id) => void (rec(kind, id).undelivered_alerted_at = new Date().toISOString()),
     cursor: async () => ({ ...cursor }),
     setCursor: async (f) => void Object.assign(cursor, f),
     failuresSince: async (iso) => failures.filter((f) => f.created_at > iso),
@@ -48,7 +60,7 @@ function setup() {
     cfg,
   );
   return {
-    notifier, escalations, cursor, failures, changes, events, posts, emails,
+    notifier, escalations, tickets, cursor, failures, changes, events, posts, emails,
     setDiscordDown: (v: boolean) => (discordDown = v), setEmailDown: (v: boolean) => (emailDown = v),
   };
 }
@@ -103,6 +115,53 @@ describe("escalation delivery", () => {
     const t = setup();
     t.escalations.set("ESC-1", escalation("ESC-1", { conversation_id: "eval-run-S7-r1" }));
     await t.notifier.escalationCreated("ESC-1");
+    await t.notifier.tick();
+    expect(t.posts).toHaveLength(0);
+    expect(t.emails).toHaveLength(0);
+  });
+});
+
+describe("ticket delivery", () => {
+  it("posts to #tickets with emails masked, and emails the team the full summary", async () => {
+    const t = setup();
+    t.tickets.set("TKT-1", ticket("TKT-1"));
+    await t.notifier.ticketCreated("TKT-1");
+    expect(t.posts).toHaveLength(1);
+    expect(t.posts[0].channel).toBe("TKT");
+    expect(t.posts[0].content).toContain("TKT-1");
+    expect(t.posts[0].content).toContain("j***@okoyeworks.example");
+    expect(t.posts[0].content).not.toContain("jude@");
+    expect(t.emails[0]).toMatchObject({ to: "team@relaypay.example", idempotencyKey: "ticket-TKT-1" });
+    expect(t.emails[0].text).toContain("jude@okoyeworks.example");
+  });
+
+  it("an existing ticket returned again (same issue) isn't re-sent", async () => {
+    const t = setup();
+    t.tickets.set("TKT-1", ticket("TKT-1"));
+    await t.notifier.ticketCreated("TKT-1");
+    await t.notifier.ticketCreated("TKT-1");
+    await t.notifier.tick();
+    expect(t.posts.filter((p) => p.channel === "TKT")).toHaveLength(1);
+    expect(t.emails).toHaveLength(1);
+  });
+
+  it("an email outage is retried on the next pass and flagged after 15 minutes", async () => {
+    const t = setup();
+    t.tickets.set("TKT-1", ticket("TKT-1", { created_at: new Date(Date.now() - 16 * 60_000).toISOString() }));
+    t.setEmailDown(true);
+    await t.notifier.tick();
+    await t.notifier.tick();
+    expect(t.posts.filter((p) => p.channel === "TKT")).toHaveLength(1);
+    expect(t.events.filter((e) => e === "ticket_undelivered")).toHaveLength(1);
+    t.setEmailDown(false);
+    await t.notifier.tick();
+    expect(t.emails).toHaveLength(1);
+  });
+
+  it("test (eval) tickets never notify", async () => {
+    const t = setup();
+    t.tickets.set("TKT-1", ticket("TKT-1", { conversation_id: "eval-run-S4-r1" }));
+    await t.notifier.ticketCreated("TKT-1");
     await t.notifier.tick();
     expect(t.posts).toHaveLength(0);
     expect(t.emails).toHaveLength(0);

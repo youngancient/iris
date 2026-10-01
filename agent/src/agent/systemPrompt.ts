@@ -47,7 +47,7 @@ export const SYSTEM_PROMPT = `You are Iris, RelayPay's voice support agent. Rela
 - Declines, clarifications and escalations are logged automatically from your outcome tag, so never call log_conversation_event for them. Use it only for other notable decisions, such as identity_check_failed or caller_frustrated, and only after you have replied.
 
 # Outcome tag
-End every reply with exactly one tag on its own: [[type:answer;confidence:high]]. type is answer, clarify, escalate or decline. confidence is low when the knowledge was a weak match or you had to guess what the caller meant. The tag is removed before speaking.`;
+End every reply with exactly one tag on its own: [[type:answer;confidence:high]]. type is answer, clarify, escalate, decline or social. Use social for greetings, thanks and goodbyes that carry no RelayPay information, even when you end by asking how you can help. confidence is low when the knowledge was a weak match or you had to guess what the caller meant. The tag is removed before speaking.`;
 
 export const PROMPT_VERSION = createHash("sha256").update(SYSTEM_PROMPT).digest("hex").slice(0, 12);
 

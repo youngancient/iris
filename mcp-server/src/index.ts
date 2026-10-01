@@ -5,6 +5,7 @@ import { createSupabaseDb } from "./db/supabaseDb.js";
 import { exitOnEnvError, optionalInt, requireBoolean, requireEmail, requireSecret, requireUrl } from "./env.js";
 import { createApp } from "./http.js";
 import { createNotifier, type Notifier } from "./notify/notifier.js";
+import { createOutageAlerter, type OutageAlerter } from "./notify/outageAlert.js";
 import { createBrevoSender, createDiscordSender } from "./notify/senders.js";
 import { createSupabaseNotifyStore } from "./notify/store.js";
 import { buildServer } from "./server.js";
@@ -29,6 +30,7 @@ try {
           discordToken: requireSecret("DISCORD_BOT_TOKEN", 20),
           errorsChannelId: requireSecret("DISCORD_ERRORS_CHANNEL_ID", 5),
           escalationsChannelId: requireSecret("DISCORD_ESCALATIONS_CHANNEL_ID", 5),
+          ticketsChannelId: requireSecret("DISCORD_TICKETS_CHANNEL_ID", 5),
           brevoKey: requireSecret("BREVO_API_KEY", 10),
           senderEmail: requireEmail("BREVO_SENDER_EMAIL"),
           supportEmail: requireEmail("SUPPORT_TEAM_EMAIL"),
@@ -49,15 +51,19 @@ if (stdio) {
   log.info("relaypay-support MCP server running on stdio");
 } else {
   let notifier: Notifier | null = null;
+  let outageAlerter: OutageAlerter | null = null;
   if (config.notify) {
     const n = config.notify;
     const supabase = createClient(config.supabaseUrl, config.supabaseKey, {
       auth: { persistSession: false },
       global: { fetch: (input, init) => fetch(input, { ...init, signal: AbortSignal.timeout(8000) }) },
     });
-    notifier = createNotifier(createSupabaseNotifyStore(supabase), createDiscordSender(n.discordToken), createBrevoSender(n.brevoKey, n.senderEmail), {
+    const discord = createDiscordSender(n.discordToken);
+    outageAlerter = createOutageAlerter(discord, n.errorsChannelId);
+    notifier = createNotifier(createSupabaseNotifyStore(supabase), discord, createBrevoSender(n.brevoKey, n.senderEmail), {
       errorsChannelId: n.errorsChannelId,
       escalationsChannelId: n.escalationsChannelId,
+      ticketsChannelId: n.ticketsChannelId,
       supportEmail: n.supportEmail,
       dashboardUrl: n.dashboardUrl,
     });
@@ -71,7 +77,7 @@ if (stdio) {
     setInterval(() => void pass(), NOTIFY_INTERVAL_MS).unref();
     setTimeout(() => void pass(), 5000).unref();
   } else {
-    log.info("Notifications are off (NOTIFY=false): no Discord posts or escalation emails.");
+    log.info("Notifications are off (NOTIFY=false): no Discord posts or emails.");
   }
 
   const app = createApp({
@@ -79,6 +85,8 @@ if (stdio) {
     token: config.mcpToken!,
     readinessCheck: async () => void (await db.customerById("CUS-0000")),
     onEscalationCreated: notifier ? (id) => void notifier!.escalationCreated(id).catch(() => {}) : undefined,
+    onTicketCreated: notifier ? (id) => void notifier!.ticketCreated(id).catch(() => {}) : undefined,
+    onRecordFailed: outageAlerter ? (tool, err) => outageAlerter!.report(tool, err) : undefined,
   });
   app.listen(config.port, () => log.info(`relaypay-support MCP server listening on :${config.port}/mcp`));
 }

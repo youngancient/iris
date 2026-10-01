@@ -40,8 +40,9 @@ export interface TurnStore {
    */
   claimTurn(conversationId: string, channel: string, turnIndex: number, userTranscript: string): Promise<TurnClaim>;
   /** Writes only if the turn still holds this transcript: a newer attempt may have taken it over (migration 011). */
-  completeTurn(conversationId: string, turnIndex: number, result: TurnResult, transcript: string): Promise<void>;
-  failTurn(conversationId: string, turnIndex: number, error: string, result: Partial<TurnResult>, transcript: string): Promise<void>;
+  /** Resolves false when a newer attempt took the turn over, so the caller skips its events. */
+  completeTurn(conversationId: string, turnIndex: number, result: TurnResult, transcript: string): Promise<boolean>;
+  failTurn(conversationId: string, turnIndex: number, error: string, result: Partial<TurnResult>, transcript: string): Promise<boolean>;
   event(conversationId: string, eventType: string, summary: string, metadata?: Record<string, unknown>): Promise<void>;
   /** Tool calls the MCP SDK rejected before our server code ran (e.g. a missing required field). */
   toolCallRejected(conversationId: string, turnIndex: number, tool: string, error: string): Promise<void>;
@@ -111,23 +112,27 @@ export function createSupabaseTurnStore(supabase: SupabaseClient): TurnStore {
     },
 
     async completeTurn(conversationId, turnIndex, result, transcript) {
-      const { error } = await supabase
+      const { data, error } = await supabase
         .from("conversation_turns")
         .update({ ...turnRow(result), status: "completed", error_message: null })
         .eq("conversation_id", conversationId)
         .eq("turn_index", turnIndex)
-        .eq("user_transcript", transcript);
+        .eq("user_transcript", transcript)
+        .select("id");
       check(error, "completeTurn");
+      return (data ?? []).length > 0;
     },
 
     async failTurn(conversationId, turnIndex, message, result, transcript) {
-      const { error } = await supabase
+      const { data, error } = await supabase
         .from("conversation_turns")
         .update({ ...turnRow(result), status: "failed", error_message: message })
         .eq("conversation_id", conversationId)
         .eq("turn_index", turnIndex)
-        .eq("user_transcript", transcript);
+        .eq("user_transcript", transcript)
+        .select("id");
       check(error, "failTurn");
+      return (data ?? []).length > 0;
     },
 
     async event(conversationId, eventType, summary, metadata = {}) {

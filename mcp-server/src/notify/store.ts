@@ -7,16 +7,26 @@ export type PendingEscalation = {
   user_name: string | null; user_email: string | null; category: string; reason: string; preferred_time: string | null;
   created_at: string; notified_at: string | null; emailed_at: string | null; undelivered_alerted_at: string | null;
 };
+export type PendingTicket = {
+  ticket_id: string; conversation_id: string | null; customer_id: string | null; transaction_id: string | null;
+  category: string; priority: string; summary: string;
+  created_at: string; notified_at: string | null; emailed_at: string | null; undelivered_alerted_at: string | null;
+};
 export type Failure = { created_at: string; kind: string; conversation_id: string | null; source: string; detail: string | null };
 export type KillSwitchChange = { created_at: string; admin_email: string; action: string; reason: string | null };
+
+/** Records the team is told about: each is posted to Discord and emailed, each at most once. */
+export type NoticeKind = "escalation" | "ticket";
 
 export interface NotifyStore {
   pendingEscalations(limit: number): Promise<PendingEscalation[]>;
   escalation(id: string): Promise<PendingEscalation | null>;
-  markNotified(id: string): Promise<void>;
-  markEmailed(id: string): Promise<void>;
-  bumpAttempt(id: string, channel: "discord" | "email"): Promise<void>;
-  markUndeliveredAlerted(id: string): Promise<void>;
+  pendingTickets(limit: number): Promise<PendingTicket[]>;
+  ticket(id: string): Promise<PendingTicket | null>;
+  markNotified(kind: NoticeKind, id: string): Promise<void>;
+  markEmailed(kind: NoticeKind, id: string): Promise<void>;
+  bumpAttempt(kind: NoticeKind, id: string, channel: "discord" | "email"): Promise<void>;
+  markUndeliveredAlerted(kind: NoticeKind, id: string): Promise<void>;
   cursor(): Promise<{ lastFailureAt: string | null; lastAdminActionAt: string | null }>;
   setCursor(fields: { lastFailureAt?: string; lastAdminActionAt?: string }): Promise<void>;
   failuresSince(iso: string, limit: number): Promise<Failure[]>;
@@ -26,48 +36,56 @@ export interface NotifyStore {
 
 const ESC_COLS =
   "escalation_id, conversation_id, ticket_id, customer_id, user_name, user_email, category, reason, preferred_time, created_at, notified_at, emailed_at, undelivered_alerted_at";
+const TICKET_COLS =
+  "ticket_id, conversation_id, customer_id, transaction_id, category, priority, summary, created_at, notified_at, emailed_at, undelivered_alerted_at";
+
+const TABLE: Record<NoticeKind, { table: string; key: string }> = {
+  escalation: { table: "escalations", key: "escalation_id" },
+  ticket: { table: "support_tickets", key: "ticket_id" },
+};
 
 export function createSupabaseNotifyStore(db: SupabaseClient): NotifyStore {
   const check = (error: { message: string } | null, what: string) => {
     if (error) throw new Error(`${what}: ${error.message}`);
   };
+  async function pending<T>(kind: NoticeKind, cols: string, limit: number): Promise<T[]> {
+    const { data, error } = await db
+      .from(TABLE[kind].table)
+      .select(cols)
+      .or("notified_at.is.null,emailed_at.is.null")
+      // Test conversations never notify the team.
+      .or("conversation_id.is.null,conversation_id.not.like.eval-*")
+      .order("created_at")
+      .limit(limit);
+    check(error, `pending ${kind}s`);
+    return (data ?? []) as T[];
+  }
+  async function one<T>(kind: NoticeKind, cols: string, id: string): Promise<T | null> {
+    const { data, error } = await db.from(TABLE[kind].table).select(cols).eq(TABLE[kind].key, id).maybeSingle();
+    check(error, kind);
+    return data as T | null;
+  }
+  async function stamp(kind: NoticeKind, id: string, column: string) {
+    const { table, key } = TABLE[kind];
+    const { error } = await db.from(table).update({ [column]: new Date().toISOString() }).eq(key, id).is(column, null);
+    check(error, `mark ${column}`);
+  }
   return {
-    async pendingEscalations(limit) {
-      const { data, error } = await db
-        .from("escalations")
-        .select(ESC_COLS)
-        .or("notified_at.is.null,emailed_at.is.null")
-        // Test conversations never notify the team.
-        .or("conversation_id.is.null,conversation_id.not.like.eval-*")
-        .order("created_at")
-        .limit(limit);
-      check(error, "pendingEscalations");
-      return (data ?? []) as PendingEscalation[];
-    },
-    async escalation(id) {
-      const { data, error } = await db.from("escalations").select(ESC_COLS).eq("escalation_id", id).maybeSingle();
-      check(error, "escalation");
-      return data as PendingEscalation | null;
-    },
-    async markNotified(id) {
-      const { error } = await db.from("escalations").update({ notified_at: new Date().toISOString() }).eq("escalation_id", id).is("notified_at", null);
-      check(error, "markNotified");
-    },
-    async markEmailed(id) {
-      const { error } = await db.from("escalations").update({ emailed_at: new Date().toISOString() }).eq("escalation_id", id).is("emailed_at", null);
-      check(error, "markEmailed");
-    },
-    async bumpAttempt(id, channel) {
+    pendingEscalations: (limit) => pending<PendingEscalation>("escalation", ESC_COLS, limit),
+    escalation: (id) => one<PendingEscalation>("escalation", ESC_COLS, id),
+    pendingTickets: (limit) => pending<PendingTicket>("ticket", TICKET_COLS, limit),
+    ticket: (id) => one<PendingTicket>("ticket", TICKET_COLS, id),
+    markNotified: (kind, id) => stamp(kind, id, "notified_at"),
+    markEmailed: (kind, id) => stamp(kind, id, "emailed_at"),
+    markUndeliveredAlerted: (kind, id) => stamp(kind, id, "undelivered_alerted_at"),
+    async bumpAttempt(kind, id, channel) {
+      const { table, key } = TABLE[kind];
       const column = channel === "discord" ? "notify_attempts" : "email_attempts";
-      const { data, error } = await db.from("escalations").select(column).eq("escalation_id", id).maybeSingle();
+      const { data, error } = await db.from(table).select(column).eq(key, id).maybeSingle();
       check(error, "bumpAttempt");
       const current = Number((data as Record<string, number> | null)?.[column] ?? 0);
-      const { error: updateError } = await db.from("escalations").update({ [column]: current + 1 }).eq("escalation_id", id);
+      const { error: updateError } = await db.from(table).update({ [column]: current + 1 }).eq(key, id);
       check(updateError, "bumpAttempt");
-    },
-    async markUndeliveredAlerted(id) {
-      const { error } = await db.from("escalations").update({ undelivered_alerted_at: new Date().toISOString() }).eq("escalation_id", id);
-      check(error, "markUndeliveredAlerted");
     },
     async cursor() {
       const { data, error } = await db.from("alert_cursor").select("last_failure_at, last_admin_action_at").eq("id", true).maybeSingle();

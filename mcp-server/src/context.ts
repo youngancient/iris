@@ -13,6 +13,10 @@ export type ToolContext = {
   deadlineMs?: number;
   /** Tells the notifier straight away; never awaited, so it can't slow or fail the tool. */
   onEscalationCreated?: (escalationId: string) => void;
+  /** Same for tickets. Called for every successful create; already-delivered tickets are skipped. */
+  onTicketCreated?: (ticketId: string) => void;
+  /** A tool_calls row couldn't be written (the database is failing): alert outside the database. */
+  onRecordFailed?: (tool: string, err: unknown) => void;
 };
 
 /**

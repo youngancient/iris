@@ -61,6 +61,7 @@ export function withToolLogging<I extends Record<string, unknown>>(
       outcome = await Promise.race([work, deadline]);
     } catch (err) {
       if (err instanceof DeadlineExceeded) {
+        log.warn({ tool: name, conversation_id: ctx.conversationId, turn_index: ctx.turnIndex, deadline_ms: ctx.deadlineMs ?? TOOL_DEADLINE_MS }, "tool missed its deadline");
         // The work carries on in the background; log what it really did once it finishes.
         void work
           .then((late) => logToolCall(ctx, buildRow(late, null, `finished after the ${ctx.deadlineMs ?? TOOL_DEADLINE_MS}ms deadline`)))
@@ -72,6 +73,7 @@ export function withToolLogging<I extends Record<string, unknown>>(
         );
       }
       internalError = err instanceof Error ? err.message : String(err);
+      log.error({ tool: name, conversation_id: ctx.conversationId, turn_index: ctx.turnIndex, err }, "tool failed");
     } finally {
       clearTimeout(timer);
     }
@@ -102,6 +104,7 @@ async function logToolCall(ctx: ToolContext, row: ToolCallInsert) {
     } catch (err) {
       if (attempt === 1) {
         log.error({ err, row }, "tool_calls insert failed");
+        ctx.onRecordFailed?.(row.tool_name, err);
       }
     }
   }

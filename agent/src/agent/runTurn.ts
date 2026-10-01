@@ -38,7 +38,13 @@ const FOLLOW_UP_STATUSES = new Set(["review required", "failed", "restricted"]);
 
 export type ChatMessage = { role: string; content?: unknown };
 
-export type TurnRequest = { conversationId: string; channel: string; messages: ChatMessage[] };
+export type TurnRequest = {
+  conversationId: string;
+  channel: string;
+  messages: ChatMessage[];
+  /** Fires when Vapi drops the request (the caller kept talking): the attempt stops and logs nothing. */
+  signal?: AbortSignal;
+};
 
 export type TurnDeps = {
   store: TurnStore;
@@ -225,6 +231,12 @@ export async function* runTurn(deps: TurnDeps, req: TurnRequest): AsyncGenerator
       abort.abort();
       stop(new Error(why));
     }, ms);
+  const onCancel = () => {
+    abort.abort();
+    stop(new Error("request cancelled"));
+  };
+  if (req.signal?.aborted) onCancel();
+  req.signal?.addEventListener("abort", onCancel, { once: true });
   const timers = [limit(FIRST_ACTIVITY_TIMEOUT_MS, "no model activity within 20s", true), limit(TURN_TIMEOUT_MS, "turn exceeded 25s", false)];
   // Resolves if the model is still silent at 8s, so the loop below can speak a holding line.
   let stallTimer: NodeJS.Timeout | undefined;
@@ -320,9 +332,13 @@ export async function* runTurn(deps: TurnDeps, req: TurnRequest): AsyncGenerator
     modelError = timedOut ?? String(err);
   } finally {
     for (const t of timers) clearTimeout(t);
+    req.signal?.removeEventListener("abort", onCancel);
     // After a stop, the SDK's last pending read may reject once its process is killed.
     pending?.catch(() => {});
   }
+
+  // Vapi dropped this attempt: nobody hears it, and the newer attempt owns the turn's record.
+  if (req.signal?.aborted) return;
 
   // Nothing but (at most) a holding line was said: the caller still needs a reply.
   if (!spoken.some((s) => s !== LOOKUP_ACK && s !== STALL_REPLY)) {
@@ -351,7 +367,12 @@ export async function* runTurn(deps: TurnDeps, req: TurnRequest): AsyncGenerator
     await safely("failTurn", () => store.failTurn(conv, turnIndex, modelError!, result, latest));
     return;
   }
-  await safely("completeTurn", () => store.completeTurn(conv, turnIndex, result, latest));
+  let current = true;
+  await safely("completeTurn", async () => {
+    current = await store.completeTurn(conv, turnIndex, result, latest);
+  });
+  // Taken over by a newer attempt: its own outcome is the one that counts.
+  if (!current) return;
   // Recorded by code from the outcome tag, so the model never spends a round-trip on it.
   const decisionEvent = outcome.answerType === "decline" ? "declined" : outcome.answerType === "clarify" ? "clarification_requested" : null;
   if (decisionEvent) {

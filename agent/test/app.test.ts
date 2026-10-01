@@ -10,8 +10,8 @@ const SECRET = "vapi-secret-that-is-at-least-32-characters";
 const turnStore: TurnStore = {
   priorActions: async () => ({ identifiedCustomer: null, tickets: [], escalations: [] }),
   claimTurn: async () => ({ state: "claimed" }),
-  completeTurn: async () => {},
-  failTurn: async () => {},
+  completeTurn: async () => true,
+  failTurn: async () => true,
   event: async () => {},
   toolCallRejected: async () => {},
 };

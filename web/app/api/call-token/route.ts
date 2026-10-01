@@ -6,7 +6,9 @@ import { callTokenEnv } from "@/lib/env";
 // Issues a short-lived token the call page passes to Vapi; the agent refuses web calls
 // without one (design §8). Rate-limited per visitor so the page can't be used to start
 // calls in bulk.
-const LIMIT_PER_HOUR = 5;
+// CALL_TOKENS_PER_HOUR raises it for local testing (1-100, default 5).
+const configured = Number(process.env.CALL_TOKENS_PER_HOUR);
+const LIMIT_PER_HOUR = Number.isInteger(configured) && configured >= 1 && configured <= 100 ? configured : 5;
 
 const json = (status: number, body: unknown) =>
   new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json", "cache-control": "no-store" } });

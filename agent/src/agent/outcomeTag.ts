@@ -1,10 +1,10 @@
 // The trailing outcome tag (design §4.3): [[type:answer;confidence:high]].
 // Held back from the stream so it's never spoken, then parsed for the turn log.
 
-export type AnswerType = "answer" | "clarify" | "escalate" | "decline";
+export type AnswerType = "answer" | "clarify" | "escalate" | "decline" | "social";
 export type Outcome = { answerType: AnswerType | null; confidence: "high" | "low" | null };
 
-const TAG = /\[\[\s*type\s*:\s*(answer|clarify|escalate|decline)\s*;\s*confidence\s*:\s*(high|low)\s*\]\]/i;
+const TAG = /\[\[\s*type\s*:\s*(answer|clarify|escalate|decline|social)\s*;\s*confidence\s*:\s*(high|low)\s*\]\]/i;
 
 /** Passes text through, holding back everything from "[[" (or a trailing "[") onwards. */
 export class TagStripper {
