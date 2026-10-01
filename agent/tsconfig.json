@@ -1,1 +1,21 @@
-{ "extends": "../tsconfig.base.json", "compilerOptions": { "outDir": "dist" }, "include": ["src", "scripts", "evals", "test"] }
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "types": [
+      "node"
+    ],
+    "outDir": "dist"
+  },
+  "include": [
+    "src",
+    "scripts",
+    "evals",
+    "test"
+  ]
+}
