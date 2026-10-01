@@ -173,17 +173,6 @@ export function createSupabaseDb(url: string, serviceKey: string): Db {
       return count ?? 0;
     },
 
-    async countCustomerEvents(eventType, customerId, sinceIso) {
-      const { count, error } = await client
-        .from("conversation_events")
-        .select("*", { count: "exact", head: true })
-        .eq("event_type", eventType)
-        .eq("metadata->>customer_id", customerId)
-        .gte("created_at", sinceIso);
-      check(error, "countCustomerEvents");
-      return count ?? 0;
-    },
-
     async insertToolCall(row) {
       const { error } = await client.from("tool_calls").insert(row);
       check(error, "insertToolCall");

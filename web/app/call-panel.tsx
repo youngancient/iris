@@ -68,7 +68,15 @@ export function CallPanel() {
     setLines([]);
     setStatus("connecting");
     try {
-      const call = await vapiRef.current.start(ASSISTANT_ID);
+      // A short-lived start token: the agent refuses web calls without one (design §8).
+      const res = await fetch("/api/call-token", { method: "POST" });
+      const body = (await res.json().catch(() => ({}))) as { token?: string; error?: string };
+      if (!res.ok || !body.token) {
+        setStatus("idle");
+        setError(body.error ?? "The call couldn't connect. Please try again in a moment.");
+        return;
+      }
+      const call = await vapiRef.current.start(ASSISTANT_ID, { metadata: { callToken: body.token } });
       if (!call) {
         setStatus("idle");
         setError("The call couldn't connect. Please try again in a moment.");

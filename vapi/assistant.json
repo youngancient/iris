@@ -14,5 +14,10 @@
     "url": "${AGENT_URL}/vapi/events",
     "timeoutSeconds": 20
   },
-  "serverMessages": ["end-of-call-report"]
+  "serverMessages": [
+    "end-of-call-report"
+  ],
+  "endCallPhrases": [
+    "This call will now end."
+  ]
 }

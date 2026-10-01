@@ -10,6 +10,8 @@ export type ToolContext = {
   turnIndex: number | null;
   /** Per-tool deadline override (tests); defaults to TOOL_DEADLINE_MS. */
   deadlineMs?: number;
+  /** Tells the notifier straight away; never awaited, so it can't slow or fail the tool. */
+  onEscalationCreated?: (escalationId: string) => void;
 };
 
 /**

@@ -16,6 +16,8 @@ const SAFETY_EVENTS: Record<string, string> = {
   identity_attempts_exceeded: "Closed verification after too many failed attempts",
   identity_switch_blocked: "Blocked a caller verifying as a second customer",
   lookup_rate_limited: "Blocked a run of lookups without verification",
+  cost_cap_reached: "Ended a call at the spending limit",
+  call_token_invalid: "Refused a call not started from the RelayPay page",
 };
 
 function percentile(sorted: number[], p: number): number | null {

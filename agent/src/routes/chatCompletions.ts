@@ -1,7 +1,28 @@
 import { randomUUID } from "node:crypto";
 import type { Request, Response } from "express";
 import { z } from "zod";
-import { FAILURE_REPLY, runTurn, type TurnDeps } from "../agent/runTurn.js";
+import { END_CALL_PHRASE, FAILURE_REPLY, runTurn, type TurnDeps } from "../agent/runTurn.js";
+import { extractCallToken, verifyCallToken } from "../callToken.js";
+import type { CallGateStore } from "../logging/callGateStore.js";
+
+export const CALL_REJECTED_REPLY = `Sorry, this call couldn't be started. Please refresh the page and try again. ${END_CALL_PHRASE}`;
+
+export type CallGate = { store: CallGateStore; tokenSecret: string };
+
+/**
+ * Web calls must have been started with a token from our page (design §8). Checked once per
+ * call: the first verified turn records it, later turns read the flag. The model is never
+ * called for a call that fails this.
+ */
+async function callAllowed(gate: CallGate, callId: string, body: Record<string, unknown>): Promise<{ ok: true } | { ok: false; reason: string }> {
+  const call = (body.call ?? {}) as { type?: string };
+  if (call.type === "inboundPhoneCall" || call.type === "outboundPhoneCall") return { ok: true }; // no browser to issue a token
+  if (await gate.store.isVerified(callId)) return { ok: true };
+  const check = verifyCallToken(gate.tokenSecret, extractCallToken(body));
+  if (!check.ok) return check;
+  if (!(await gate.store.claimNonce(callId, check.nonce, check.customerId))) return { ok: false, reason: "reused" };
+  return { ok: true };
+}
 
 // Vapi's custom LLM calls an OpenAI-compatible /chat/completions with stream: true
 // and expects chat.completion.chunk SSE events ending with [DONE].
@@ -11,7 +32,7 @@ const body = z.object({
   stream: z.boolean().optional(),
 });
 
-export function chatCompletions(deps: TurnDeps) {
+export function chatCompletions(deps: TurnDeps, gate: CallGate | null) {
   return async (req: Request, res: Response) => {
     const parsed = body.safeParse(req.body);
     if (!parsed.success) {
@@ -40,6 +61,18 @@ export function chatCompletions(deps: TurnDeps) {
 
     let spokeAnything = false;
     try {
+      if (gate) {
+        const allowed = await callAllowed(gate, call.id, req.body);
+        if (!allowed.ok) {
+          // The reason only, never the token itself.
+          await gate.store.event(call.id, "call_token_invalid", `Call refused: ${allowed.reason} start token.`, { reason: allowed.reason }).catch(() => {});
+          send(CALL_REJECTED_REPLY);
+          send(null, "stop");
+          res.write("data: [DONE]\n\n");
+          res.end();
+          return;
+        }
+      }
       for await (const sentence of runTurn(deps, { conversationId: call.id, channel: "web", messages })) {
         send(`${sentence} `);
         spokeAnything = true;

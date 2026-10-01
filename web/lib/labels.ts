@@ -35,6 +35,9 @@ const EVENT_LABELS: Record<string, string> = {
   identity_attempts_exceeded: "Verification closed after too many failed attempts",
   identity_switch_blocked: "Caller tried to verify as a second customer (blocked)",
   lookup_rate_limited: "Too many lookups without verification (blocked)",
+  escalation_undelivered: "The team wasn't notified of this escalation in time",
+  call_token_invalid: "Call refused: it wasn't started from the RelayPay page",
+  cost_cap_reached: "Call ended at the spending limit",
 };
 
 /** Bookkeeping events that aren't worth showing in a transcript. */

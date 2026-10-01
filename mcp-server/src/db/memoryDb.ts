@@ -123,12 +123,6 @@ export class MemoryDb implements Db {
     this.guard();
     return this.events.filter((e) => e.conversation_id === conversationId && e.event_type === eventType).length;
   }
-  async countCustomerEvents(eventType: string, customerId: string, sinceIso: string) {
-    this.guard();
-    return this.events.filter(
-      (e) => e.event_type === eventType && e.metadata.customer_id === customerId && (e.created_at ?? new Date().toISOString()) >= sinceIso,
-    ).length;
-  }
   async insertToolCall(row: ToolCallInsert) {
     this.guard();
     this.toolCalls.push(row);

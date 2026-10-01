@@ -21,6 +21,9 @@ export const FAILURE_REPLY =
 export const LOOKUP_ACK = "Let me check that for you.";
 export const STALL_REPLY = "Sorry, just a moment.";
 export const MAINTENANCE_REPLY = "Support is temporarily unavailable. Please use your RelayPay dashboard.";
+// Vapi hangs up when the assistant says this (endCallPhrases in vapi/assistant.json).
+export const END_CALL_PHRASE = "This call will now end.";
+export const COST_CAP_REPLY = `I've reached the limit for this call. Please contact support from your RelayPay dashboard. ${END_CALL_PHRASE}`;
 
 // No model activity after 8s: say a holding line and keep waiting (occasionally the
 // SDK is slow to start; giving up there would fail a turn that was about to succeed).
@@ -43,6 +46,8 @@ export type TurnDeps = {
   model: string;
   /** The dashboard's kill switch (app_settings.maintenance). When on, the model is never called. */
   maintenance?: () => Promise<boolean>;
+  /** Per-call spending cap (design §8): model spend so far on this call, and the limit. */
+  spend?: { soFar: (conversationId: string) => Promise<number>; capUsd: number };
   now?: () => number;
 };
 
@@ -99,12 +104,20 @@ export async function* runTurn(deps: TurnDeps, req: TurnRequest): AsyncGenerator
       : Promise.resolve(null);
 
   // What this call already did, read in parallel with retrieval (design: stateless turns, state from our records).
-  const priorActions = turnIndex === 0
-    ? Promise.resolve(null)
-    : store.priorActions(conv).catch((err) => {
+  // Read on every turn, the first included: it carries who the caller is signed in as.
+  const priorActions = store.priorActions(conv).catch((err) => {
         console.error(JSON.stringify({ level: "error", msg: "priorActions failed", err: String(err) }));
         return null;
       });
+
+  // Spend so far, read alongside retrieval; the first turn can't be over the cap.
+  const spentSoFar =
+    deps.spend && turnIndex > 0
+      ? deps.spend.soFar(conv).catch((err) => {
+          console.error(JSON.stringify({ level: "error", msg: "spend read failed", err: String(err) }));
+          return 0;
+        })
+      : Promise.resolve(0);
 
   const claim = await claimed;
   mark("claim");
@@ -118,6 +131,20 @@ export async function* runTurn(deps: TurnDeps, req: TurnRequest): AsyncGenerator
   }
 
   const base = { model: null, promptVersion: null, costUsd: null, inputTokens: null, outputTokens: null, cacheReadTokens: null };
+
+  if (deps.spend && (await spentSoFar) >= deps.spend.capUsd) {
+    yield COST_CAP_REPLY;
+    await safely("cost cap event", () =>
+      store.event(conv, "cost_cap_reached", `Call ended at the $${deps.spend!.capUsd.toFixed(2)} spending cap.`, { turn_index: turnIndex }),
+    );
+    await safely("completeTurn", () =>
+      store.completeTurn(conv, turnIndex, {
+        ...base, assistantResponse: COST_CAP_REPLY, answerType: "decline", confidenceNote: "cost_cap",
+        retrievalUsed: false, latencyMs: now() - started, timings: { ...timings, total: now() - started },
+      }),
+    );
+    return;
+  }
 
   if (deps.maintenance && (await deps.maintenance())) {
     yield MAINTENANCE_REPLY;

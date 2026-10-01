@@ -4,7 +4,7 @@ import express, { type NextFunction, type Request, type Response } from "express
 import type { Db } from "./db/types.js";
 import { buildServer } from "./server.js";
 
-type Options = { db: Db; token: string; readinessCheck?: () => Promise<void> };
+type Options = { db: Db; token: string; readinessCheck?: () => Promise<void>; onEscalationCreated?: (id: string) => void };
 
 function tokensMatch(given: string, expected: string): boolean {
   const a = Buffer.from(given);
@@ -12,7 +12,7 @@ function tokensMatch(given: string, expected: string): boolean {
   return a.length === b.length && timingSafeEqual(a, b);
 }
 
-export function createApp({ db, token, readinessCheck }: Options) {
+export function createApp({ db, token, readinessCheck, onEscalationCreated }: Options) {
   const app = express();
   app.disable("x-powered-by");
   app.use(express.json({ limit: "256kb" }));
@@ -44,7 +44,7 @@ export function createApp({ db, token, readinessCheck }: Options) {
   app.post("/mcp", requireToken, async (req, res) => {
     const turnHeader = req.get("x-turn-index");
     const turnIndex = turnHeader !== undefined && /^\d+$/.test(turnHeader) ? Number(turnHeader) : null;
-    const server = buildServer({ db, conversationId: req.get("x-conversation-id")?.trim() || null, turnIndex });
+    const server = buildServer({ db, conversationId: req.get("x-conversation-id")?.trim() || null, turnIndex, onEscalationCreated });
     const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
     res.on("close", () => {
       void transport.close();

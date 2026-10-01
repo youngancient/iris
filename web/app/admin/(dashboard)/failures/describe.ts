@@ -26,6 +26,8 @@ export function describeFailure(kind: string, source: string): { text: string; s
       return { severity: "amber", text: "A caller already verified as one customer tried to verify as another. Iris refused." };
     case "lookup_rate_limited":
       return { severity: "amber", text: "An unverified caller looked up many payments in one call. Further lookups were refused, in case someone was guessing references." };
+    case "escalation_undelivered":
+      return { severity: "red", text: "An escalation wasn't delivered to the team by Discord or email within 15 minutes. Check the Queue: the caller is waiting for a callback." };
     case "conversation_id_mismatch":
       return { severity: "grey", text: "A tool call used the wrong call reference. It was corrected automatically." };
     default:

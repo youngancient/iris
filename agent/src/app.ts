@@ -2,12 +2,12 @@ import { timingSafeEqual } from "node:crypto";
 import express, { type NextFunction, type Request, type Response } from "express";
 import type { TurnDeps } from "./agent/runTurn.js";
 import type { CallStore } from "./logging/callStore.js";
-import { chatCompletions } from "./routes/chatCompletions.js";
+import { type CallGate, chatCompletions } from "./routes/chatCompletions.js";
 import { vapiEvents } from "./routes/vapiEvents.js";
 
-type AppDeps = { vapiSecret: string; turn: TurnDeps; calls: CallStore };
+type AppDeps = { vapiSecret: string; turn: TurnDeps; calls: CallStore; gate: CallGate | null };
 
-export function createApp({ vapiSecret, turn, calls }: AppDeps) {
+export function createApp({ vapiSecret, turn, calls, gate }: AppDeps) {
   const app = express();
   app.disable("x-powered-by");
   app.use(express.json({ limit: "1mb" }));
@@ -33,7 +33,7 @@ export function createApp({ vapiSecret, turn, calls }: AppDeps) {
   app.get("/health", (_req, res) => {
     res.json({ ok: true });
   });
-  app.post("/chat/completions", requireVapi, chatCompletions(turn));
+  app.post("/chat/completions", requireVapi, chatCompletions(turn, gate));
   app.post("/vapi/events", requireVapi, vapiEvents(calls));
 
   app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {

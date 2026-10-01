@@ -1,6 +1,7 @@
 import type { AddressInfo } from "node:net";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createApp } from "../src/app.js";
+import { signCallToken } from "../src/callToken.js";
 import type { CallStore, CallSummary } from "../src/logging/callStore.js";
 import type { TurnStore } from "../src/logging/turnStore.js";
 
@@ -25,12 +26,35 @@ const calls: CallStore = {
   hasEvent: async (_id, type) => events.includes(type),
 };
 
+// Token gate: calls start with a token signed by the web app (design §8).
+const TOKEN_SECRET = "call-token-secret-at-least-32-characters";
+const verified = new Set<string>();
+const usedNonces = new Map<string, string>();
+const gateEvents: string[] = [];
+const gate = {
+  tokenSecret: TOKEN_SECRET,
+  store: {
+    isVerified: async (id: string) => verified.has(id),
+    claimNonce: async (id: string, nonce: string, _customerId: string | null) => {
+      const owner = usedNonces.get(nonce);
+      if (owner && owner !== id) return false;
+      usedNonces.set(nonce, id);
+      verified.add(id);
+      return true;
+    },
+    event: async (_id: string, type: string) => void gateEvents.push(type),
+    spentSoFar: async () => 0,
+  },
+};
+const token = (nonce = "n".repeat(22), exp = Math.floor(Date.now() / 1000) + 120) => signCallToken(TOKEN_SECRET, { n: nonce, e: exp });
+
 let base = "";
 let close: () => void;
 beforeAll(async () => {
   const app = createApp({
     vapiSecret: SECRET,
     calls,
+    gate,
     turn: {
       store: turnStore,
       model: "test",
@@ -57,7 +81,7 @@ describe("agent HTTP", () => {
   });
 
   it("streams OpenAI-style chunks ending in [DONE], with the tag removed", async () => {
-    const res = await post("/chat/completions", { stream: true, call: { id: "call-9" }, messages: [{ role: "user", content: "Can you help me with a payout?" }] });
+    const res = await post("/chat/completions", { stream: true, call: { id: "call-9", metadata: { callToken: token("a".repeat(22)) } }, messages: [{ role: "user", content: "Can you help me with a payout?" }] });
     expect(res.headers.get("content-type")).toContain("text/event-stream");
     const text = await res.text();
     const chunks = text.split("\n\n").filter(Boolean);
@@ -85,5 +109,38 @@ describe("agent HTTP", () => {
   it("other Vapi events are acknowledged and ignored", async () => {
     summary = { ...summary };
     expect((await post("/vapi/events", { message: { type: "status-update", call: { id: "x" } } })).status).toBe(200);
+  });
+
+  const speak = async (call: Record<string, unknown>) => {
+    const res = await post("/chat/completions", { stream: true, call, messages: [{ role: "user", content: "Hello, can you help?" }] });
+    return (await res.text()).split("\n\n").filter((c) => c.startsWith("data: {")).map((c) => JSON.parse(c.slice(6)).choices[0].delta.content ?? "").join("");
+  };
+
+  it("refuses a web call with no start token, and ends it", async () => {
+    const text = await speak({ id: "call-no-token" });
+    expect(text).toContain("couldn't be started");
+    expect(text).toContain("This call will now end.");
+    expect(gateEvents).toContain("call_token_invalid");
+  });
+
+  it("refuses an expired or forged token", async () => {
+    expect(await speak({ id: "call-expired", metadata: { callToken: token("b".repeat(22), 1) } })).toContain("couldn't be started");
+    const forged = signCallToken("some-other-secret-that-is-32-chars-long", { n: "c".repeat(22), e: Math.floor(Date.now() / 1000) + 60 });
+    expect(await speak({ id: "call-forged", metadata: { callToken: forged } })).toContain("couldn't be started");
+  });
+
+  it("a token starts exactly one call", async () => {
+    const t = token("d".repeat(22));
+    expect(await speak({ id: "call-first", metadata: { callToken: t } })).not.toContain("couldn't be started");
+    expect(await speak({ id: "call-second", metadata: { callToken: t } })).toContain("couldn't be started");
+  });
+
+  it("later turns of a verified call don't need the token again", async () => {
+    await speak({ id: "call-multi", assistantOverrides: { metadata: { callToken: token("e".repeat(22)) } } });
+    expect(await speak({ id: "call-multi" })).not.toContain("couldn't be started");
+  });
+
+  it("phone calls are exempt (no browser to issue a token)", async () => {
+    expect(await speak({ id: "call-phone", type: "inboundPhoneCall" })).not.toContain("couldn't be started");
   });
 });

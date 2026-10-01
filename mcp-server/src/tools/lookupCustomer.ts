@@ -4,14 +4,13 @@ import type { ToolContext } from "../context.js";
 import type { CustomerRow } from "../db/types.js";
 import { normalizeCompany, normalizeEmail, normalizeRef, present } from "../lib/normalize.js";
 import { withToolLogging } from "../lib/withToolLogging.js";
-import { customerLockedOut, identityAttemptsExhausted, identitySwitchBlocked, recordFailedAttempt } from "./limits.js";
+import { identitySwitchBlocked } from "./limits.js";
 
 const description =
   "Use this tool when the user provides enough safe identifying information to find a customer record. " +
-  "Accepts customer_id, email and company_name. Full account details are only returned when the email on file " +
-  "matches together with the company name or customer ID; if plan, account_status, kyc_status and support_notes " +
-  "come back empty, ask the caller for the email address on file and call again with both. " +
-  "support_notes is internal guidance: act on it, never read it aloud.";
+  "Accepts customer_id, email and company_name. Account details (plan, account_status, kyc_status, support_notes) " +
+  "are only returned when the caller is signed in on the RelayPay page as that customer; otherwise they come back " +
+  "empty and the caller must sign in to discuss their account. support_notes is internal guidance: act on it, never read it aloud.";
 
 const inputSchema = {
   customer_id: z.string().optional(),
@@ -51,52 +50,33 @@ export function register(server: McpServer, ctx: ToolContext) {
           return { status: "invalid", message: "Provide at least one of customer_id, email or company_name." };
         }
 
-        // A company/ID + email match is an identification attempt; those are limited (design §5.2).
-        const attempt = Boolean(email) && [customerId, company].some(Boolean);
-        if (attempt && (await identityAttemptsExhausted(ctx))) return { status: "not_found", data: notFound };
-
-        // Every identifier given must point at the same single customer (design §5.2).
-        // One read per identifier given, all at once.
+        // Every identifier given must point at the same single customer.
         const [byId, byEmail, byCompany] = await Promise.all([
           customerId ? ctx.db.customerById(customerId).then((c) => (c ? [c] : [])) : null,
           email ? ctx.db.customersByEmail(email) : null,
           company ? ctx.db.customersByCompany(company) : null,
         ]);
         const candidateSets: CustomerRow[][] = [byId, byEmail, byCompany].filter((set): set is CustomerRow[] => set !== null);
-
         const ids = candidateSets.map((set) => set.map((c) => c.customer_id));
         const shared = ids.reduce((acc, set) => acc.filter((id) => set.includes(id)));
-        if (shared.length !== 1) {
-          if (attempt) {
-            // Count the failure against the customer the company/ID point at (if they agree on
-            // one), so repeated guessing at one account locks that account across calls.
-            const targets = new Set([...(byId ?? []), ...(byCompany ?? [])].map((c) => c.customer_id));
-            await recordFailedAttempt(ctx, targets.size === 1 ? [...targets][0] : null);
-          }
-          return { status: "not_found", data: notFound };
-        }
-
+        if (shared.length !== 1) return { status: "not_found", data: notFound };
         const customer = candidateSets[0].find((c) => c.customer_id === shared[0])!;
 
-        // Email is the only identifier that isn't semi-public, so it's required for full details.
-        const identified = Boolean(email) && candidateSets.length >= 2;
-        if (!identified) {
+        // Identity comes only from signing in on the RelayPay page (design §5.2): the call-start
+        // token sets it server-side. Nothing a caller says can unlock account details.
+        const signedInAs = ctx.conversationId ? await ctx.db.identifiedCustomer(ctx.conversationId) : null;
+        if (signedInAs && signedInAs !== customer.customer_id) {
+          // Signed in as one customer, asking about another: reveal nothing (identity lock).
+          await identitySwitchBlocked(ctx, signedInAs, customer.customer_id);
+          return { status: "not_found", data: notFound };
+        }
+        if (signedInAs !== customer.customer_id) {
           return {
             status: "success",
             data: { ...notFound, found: true, customer_id: customer.customer_id, company_name: customer.company_name },
           };
         }
 
-        if (await customerLockedOut(ctx, customer.customer_id)) return { status: "not_found", data: notFound };
-        if (ctx.conversationId) {
-          // Identity lock: the first customer verified on a call stays the only one (design §5.2).
-          const already = await ctx.db.identifiedCustomer(ctx.conversationId);
-          if (already && already !== customer.customer_id) {
-            await identitySwitchBlocked(ctx, already, customer.customer_id);
-            return { status: "not_found", data: notFound };
-          }
-          if (!already) await ctx.db.setIdentifiedCustomer(ctx.conversationId, customer.customer_id);
-        }
         const data: Output = {
           found: true,
           customer_id: customer.customer_id,

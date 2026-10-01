@@ -4,6 +4,7 @@ import { createRetriever, supabaseSearch } from "./agent/retrieval.js";
 import { createApp } from "./app.js";
 import { loadOrExit, loadServerConfig } from "./config.js";
 import { createVoyageEmbedder } from "./kb/voyage.js";
+import { createSupabaseCallGateStore } from "./logging/callGateStore.js";
 import { createSupabaseCallStore } from "./logging/callStore.js";
 import { createSupabaseTurnStore } from "./logging/turnStore.js";
 
@@ -37,6 +38,8 @@ async function isMaintenance(): Promise<boolean> {
   return maintenance.on;
 }
 
+const callGate = createSupabaseCallGateStore(supabase);
+
 const app = createApp({
   vapiSecret: config.vapiSecret,
   turn: {
@@ -45,8 +48,10 @@ const app = createApp({
     retrieve,
     model: config.agentModel,
     maintenance: isMaintenance,
+    spend: { soFar: (id) => callGate.spentSoFar(id), capUsd: config.callSpendCapUsd },
   },
   calls: createSupabaseCallStore(supabase),
+  gate: { store: callGate, tokenSecret: config.callTokenSecret },
 });
 
 // Warm the Supabase and Voyage connections so the first caller doesn't pay for cold TLS setup.

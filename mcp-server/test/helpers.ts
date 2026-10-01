@@ -35,8 +35,12 @@ export function seededDb() {
   });
 }
 
-/** An MCP client connected in-process to a server bound to one conversation. */
-export async function connect(db: MemoryDb, conversationId: string | null = "conv-1") {
+/**
+ * An MCP client connected in-process to a server bound to one conversation.
+ * signedInAs simulates a call started by a signed-in customer (the call-start token sets this).
+ */
+export async function connect(db: MemoryDb, conversationId: string | null = "conv-1", signedInAs?: string) {
+  if (signedInAs && conversationId) await db.setIdentifiedCustomer(conversationId, signedInAs);
   const server = buildServer({ db, conversationId, turnIndex: 0 });
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
   await server.connect(serverTransport);

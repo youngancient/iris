@@ -110,6 +110,14 @@ run: for (let rep = 1; rep <= runs; rep++) {
       runModel: runner(scenario.mcpDown ? "http://127.0.0.1:9/mcp" : config.mcpUrl),
     };
 
+    if (scenario.signedInAs) {
+      // As the call-start token would for a signed-in customer.
+      const { error } = await supabase
+        .from("conversations")
+        .upsert({ conversation_id: conversationId, channel: "eval", identified_customer_id: scenario.signedInAs }, { onConflict: "conversation_id" });
+      if (error) throw new Error(`signing in ${scenario.id}: ${error.message}`);
+    }
+
     const messages: { role: string; content: string }[] = [];
     const spoken: string[] = [];
     let error: string | null = null;

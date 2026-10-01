@@ -21,15 +21,21 @@ function requiredUrl(name: string): string {
   return value.replace(/\/+$/, "");
 }
 
-export function serverEnv() {
+/** Only what /api/call-token needs, so the public call page works without the dashboard's keys. */
+export function callTokenEnv() {
   return {
     supabaseUrl: requiredUrl("SUPABASE_URL"),
     supabaseServiceKey: required("SUPABASE_SERVICE_ROLE_KEY", 20),
-    // Only for Supabase Auth sign-in, and only ever used on the server.
-    supabaseAnonKey: required("SUPABASE_ANON_KEY", 20),
-    adminEmails: required("ADMIN_EMAILS")
-      .split(",")
-      .map((e) => e.trim().toLowerCase())
-      .filter(Boolean),
+    callTokenSecret: required("CALL_TOKEN_SECRET", 32),
   };
 }
+
+/** Supabase access for customer sign-in and the session check (no staff allowlist needed). */
+export function authEnv() {
+  return {
+    supabaseUrl: requiredUrl("SUPABASE_URL"),
+    supabaseServiceKey: required("SUPABASE_SERVICE_ROLE_KEY", 20),
+    supabaseAnonKey: required("SUPABASE_ANON_KEY", 20),
+  };
+}
+

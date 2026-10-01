@@ -2,7 +2,7 @@
 
 import { redirect } from "next/navigation";
 import { z } from "zod";
-import { serverEnv } from "@/lib/env";
+import { isStaffSession } from "@/lib/dal";
 import { authClient } from "@/lib/supabase";
 
 const Credentials = z.object({ email: z.email().max(254), password: z.string().min(1).max(200) });
@@ -15,12 +15,14 @@ export async function signIn(_prev: SignInState, form: FormData): Promise<SignIn
   const failed = { error: "That email and password don't match a staff account." };
   if (!parsed.success) return failed;
 
-  const email = parsed.data.email.toLowerCase();
-  if (!serverEnv().adminEmails.includes(email)) return failed;
-
   const supabase = await authClient();
-  const { error } = await supabase.auth.signInWithPassword({ email, password: parsed.data.password });
+  const { error } = await supabase.auth.signInWithPassword({ email: parsed.data.email.toLowerCase(), password: parsed.data.password });
   if (error) return failed;
+  // A valid login without the staff role (e.g. a customer) is signed straight back out.
+  if (!(await isStaffSession())) {
+    await supabase.auth.signOut();
+    return failed;
+  }
   redirect("/admin/queue");
 }
 

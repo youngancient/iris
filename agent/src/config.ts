@@ -31,6 +31,10 @@ export function loadServerConfig() {
     mcpUrl: requireUrl("MCP_URL"),
     mcpToken: requireSecret("MCP_TOKEN", 32),
     agentModel: optionalString("AGENT_MODEL", "claude-sonnet-5-5", /^claude-[a-z0-9-]+$/),
+    // Shared with the web app, which signs the call-start tokens (design §8).
+    callTokenSecret: requireSecret("CALL_TOKEN_SECRET", 32),
+    // Model spend at which a call is politely ended (design §8).
+    callSpendCapUsd: optionalNumber("CALL_SPEND_CAP_USD", 0.5, 0.05, 5),
     port: optionalInt("PORT", 8787, 1, 65535),
   };
 }

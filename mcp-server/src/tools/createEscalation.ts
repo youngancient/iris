@@ -75,6 +75,7 @@ export function register(server: McpServer, ctx: ToolContext) {
 
         // Written by the server itself, so it never depends on the model calling log_conversation_event.
         if (escalation.created) {
+          ctx.onEscalationCreated?.(escalation.escalation_id);
           await ctx.db.insertEvent({
             conversation_id: conversationId,
             event_type: "escalation_created",

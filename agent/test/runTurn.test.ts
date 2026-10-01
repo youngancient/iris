@@ -262,7 +262,7 @@ describe("runTurn", () => {
     expect(prompts[0]).toContain("Already done in this call");
     expect(prompts[0]).toContain("Support ticket TKT-1 created (turn 0)");
     expect(prompts[0]).toContain("Escalation ESC-1 created (turn 2)");
-    expect(prompts[0]).toContain("verified as customer CUS-1003");
+    expect(prompts[0]).toContain("signed in as customer CUS-1003");
   });
 
   it("kill switch on: the fixed unavailable line, and the model is never called", async () => {
@@ -271,5 +271,30 @@ describe("runTurn", () => {
     expect(out).toEqual(["Support is temporarily unavailable. Please use your RelayPay dashboard."]);
     expect(prompts).toHaveLength(0);
     expect(store.turns.get("call-1:0")?.result).toMatchObject({ confidenceNote: "maintenance" });
+  });
+
+  it("over the spending cap: a polite closing line, no model call", async () => {
+    const { deps, prompts, store } = setup([{ type: "text", text: "Hi. [[type:answer;confidence:high]]" }, result]);
+    const capped = { ...deps, spend: { soFar: async () => 0.62, capUsd: 0.5 } };
+    const out = await collect(runTurn(capped, req("And one more thing?", [{ role: "user", content: "Hi" }, { role: "assistant", content: "Hello" }])));
+    expect(out[0]).toContain("reached the limit for this call");
+    expect(out[0]).toContain("This call will now end.");
+    expect(prompts).toHaveLength(0);
+    expect(store.events.map((e) => e.type)).toContain("cost_cap_reached");
+  });
+
+  it("under the cap, the turn runs normally", async () => {
+    const { deps } = setup([{ type: "text", text: "Sure. [[type:answer;confidence:high]]" }, result]);
+    const out = await collect(runTurn({ ...deps, spend: { soFar: async () => 0.1, capUsd: 0.5 } }, req("Next?", [{ role: "user", content: "Hi" }, { role: "assistant", content: "Hello" }])));
+    expect(out).toEqual(["Sure."]);
+  });
+
+  it("tells the model on the first turn whether the caller is signed in", async () => {
+    const { deps, store, prompts } = setup([{ type: "text", text: "Hi. [[type:answer;confidence:high]]" }, result]);
+    await collect(runTurn(deps, req("Can you check my account?")));
+    expect(prompts[0]).toContain("The caller is not signed in.");
+    store.prior = { identifiedCustomer: "CUS-1006", tickets: [], escalations: [] };
+    await collect(runTurn(deps, { ...req("Can you check my account?"), conversationId: "call-2" }));
+    expect(prompts[1]).toContain("signed in as customer CUS-1006");
   });
 });

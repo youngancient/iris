@@ -36,6 +36,20 @@ export function optionalInt(name: string, fallback: number, min: number, max: nu
   return value;
 }
 
+/** A required true/false switch: no default, so turning a feature off is always a decision. */
+export function requireBoolean(name: string): boolean {
+  const value = process.env[name]?.trim().toLowerCase();
+  if (value === "true") return true;
+  if (value === "false") return false;
+  throw new EnvError(`${name} must be set to true or false`);
+}
+
+export function requireEmail(name: string): string {
+  const value = requireSecret(name);
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) throw new EnvError(`${name} must be an email address`);
+  return value;
+}
+
 /** Print the problem (never a value) to stderr and exit. */
 export function exitOnEnvError(err: unknown): never {
   console.error(err instanceof EnvError ? `Config error: ${err.message}` : err);
