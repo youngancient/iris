@@ -64,6 +64,20 @@ async function checkMicrophone(): Promise<string | null> {
   }
 }
 
+// Daily downloads this noise-cancellation model (5.9 MB) while joining a call, and the Vapi SDK
+// always turns noise cancellation on. On a cold cache that download alone can outlast Vapi's 15s
+// wait for the caller's audio, so the first call fails. Fetched in the background when the page
+// opens, it's cached by the time the caller presses the button. Versioned with daily-js: if Daily
+// ships a new model, this just stops helping (it never breaks a call).
+const NOISE_MODEL_URL = "https://c.daily.co/static/krisp/v2.2.1/weights/c6.f.s.da1785.kef";
+
+/** A console logger for one call attempt, with ms since it began. Only ever called from event handlers. */
+function attemptTracer(attempt: number) {
+  const began = performance.now();
+  return (stage: string, detail?: unknown) =>
+    console.info(`[call] attempt ${attempt} +${Math.round(performance.now() - began)}ms: ${stage}`, detail ?? "");
+}
+
 const clock = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
 
 export function CallPanel({ signedIn, available: availableAtLoad }: { signedIn: boolean; available: boolean }) {
@@ -91,6 +105,17 @@ export function CallPanel({ signedIn, available: availableAtLoad }: { signedIn: 
   // Close any call still open when the page goes away.
   useEffect(() => () => void vapiRef.current?.stop(), []);
 
+  // Warm the browser cache with the noise-cancellation model (see NOISE_MODEL_URL).
+  // Same request mode as Daily's own fetch (CORS, no credentials), so it shares the cache entry.
+  useEffect(() => {
+    if (!PUBLIC_KEY || !availableAtLoad) return;
+    const controller = new AbortController();
+    fetch(NOISE_MODEL_URL, { mode: "cors", credentials: "omit", signal: controller.signal })
+      .then((res) => res.arrayBuffer())
+      .catch(() => {}); // only an optimisation: the call still works without it, just slower to start
+    return () => controller.abort();
+  }, [availableAtLoad]);
+
   // Call timer.
   useEffect(() => {
     if (status !== "live") return;
@@ -113,7 +138,7 @@ export function CallPanel({ signedIn, available: availableAtLoad }: { signedIn: 
    */
   async function connect(attempt: number): Promise<void> {
     if (!PUBLIC_KEY || !ASSISTANT_ID) return;
-    const trace = (stage: string, detail?: unknown) => console.info(`[call] attempt ${attempt}: ${stage}`, detail ?? "");
+    const trace = attemptTracer(attempt);
 
     // A short-lived start token: the agent refuses web calls without one (design §8). Single use, so one per attempt.
     trace("requesting call token");
@@ -154,11 +179,18 @@ export function CallPanel({ signedIn, available: availableAtLoad }: { signedIn: 
       setError(message);
     };
 
-    // Iris greets the caller a second or two after joining. Silence well past that means the
-    // caller's audio never reached Vapi (it hangs up itself at 15s): retry before that.
-    const watchdog = setTimeout(() => void failed("no greeting within 12s", NO_AUDIO), 12_000);
+    // Two limits. Iris greets the caller a second or two after the browser joins, so silence
+    // 8s after joining means the caller's audio isn't reaching Vapi. And if joining itself hangs,
+    // give up at 20s (Vapi ends the call on its side at 15s without audio, which also lands here).
+    let watchdog = setTimeout(() => void failed("not joined within 20s", NO_AUDIO), 20_000);
 
-    vapi.on("call-start-progress", (e: { stage: string; status: string }) => trace(`${e.stage} ${e.status}`));
+    vapi.on("call-start-progress", (e: { stage: string; status: string }) => {
+      trace(`${e.stage} ${e.status}`);
+      if (e.stage === "daily-call-join" && e.status === "completed" && !settled) {
+        clearTimeout(watchdog);
+        watchdog = setTimeout(() => void failed("no greeting within 8s of joining", NO_AUDIO), 8_000);
+      }
+    });
     vapi.on("call-start", () => {
       if (!current()) return;
       trace("joined");

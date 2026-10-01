@@ -16,12 +16,13 @@ const turnStore: TurnStore = {
   toolCallRejected: async () => {},
 };
 
-const ended: { id: string; finalStatus: string; callerId: string; costUsd?: number | null; durationS?: number | null }[] = [];
+const ended: { id: string; finalStatus: string; callerId: string; costUsd?: number | null; durationS?: number | null; startedAt?: string | null; endedAt?: string | null }[] = [];
 const events: string[] = [];
 let summary: CallSummary = { tickets: 0, escalations: 0, turns: 2, followUpSeen: true, identifiedCustomer: "CUS-1001" };
 const calls: CallStore = {
   summarize: async () => summary,
-  endCall: async (id, f) => void ended.push({ id, finalStatus: f.finalStatus, callerId: f.callerId, costUsd: f.costUsd, durationS: f.durationS }),
+  endCall: async (id, f) =>
+    void ended.push({ id, finalStatus: f.finalStatus, callerId: f.callerId, costUsd: f.costUsd, durationS: f.durationS, startedAt: f.startedAt, endedAt: f.endedAt }),
   event: async (_id, type) => void events.push(type),
   hasEvent: async (_id, type) => events.includes(type),
 };
@@ -102,8 +103,17 @@ describe("agent HTTP", () => {
     const report = { message: { type: "end-of-call-report", call: { id: "call-9" }, cost: 0.042, durationSeconds: 95.4, analysis: { summary: "Caller asked about a payout." } } };
     expect((await post("/vapi/events", report, { "x-vapi-secret": SECRET })).status).toBe(200);
     await post("/vapi/events", report, { "x-vapi-secret": SECRET });
-    expect(ended[0]).toEqual({ id: "call-9", finalStatus: "resolved", callerId: "CUS-1001", costUsd: 0.042, durationS: 95.4 });
+    expect(ended[0]).toEqual({ id: "call-9", finalStatus: "resolved", callerId: "CUS-1001", costUsd: 0.042, durationS: 95.4, startedAt: null, endedAt: null });
     expect(events.filter((e) => e === "missed_followup")).toHaveLength(1);
+  });
+
+  it("end-of-call report: passes on Vapi's own start and end times, and drops unparseable ones", async () => {
+    ended.length = 0;
+    const report = {
+      message: { type: "end-of-call-report", call: { id: "call-10" }, startedAt: "2026-10-01T22:39:47.000Z", endedAt: "not a date", durationSeconds: 0 },
+    };
+    expect((await post("/vapi/events", report, { "x-vapi-secret": SECRET })).status).toBe(200);
+    expect(ended[0]).toMatchObject({ id: "call-10", startedAt: "2026-10-01T22:39:47.000Z", endedAt: null });
   });
 
   it("other Vapi events are acknowledged and ignored", async () => {

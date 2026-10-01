@@ -9,7 +9,11 @@ export interface CallStore {
   /** Idempotent: ended_at is only set the first time. */
   endCall(
     conversationId: string,
-    fields: { summary: string | null; finalStatus: string; callerId: string; costUsd: number | null; durationS: number | null },
+    fields: {
+      summary: string | null; finalStatus: string; callerId: string; costUsd: number | null; durationS: number | null;
+      /** From Vapi's report. startedAt only applies if the report creates the row (a call that never reached the agent). */
+      startedAt: string | null; endedAt: string | null;
+    },
   ): Promise<void>;
   event(conversationId: string, eventType: string, summary: string, metadata?: Record<string, unknown>): Promise<void>;
   hasEvent(conversationId: string, eventType: string): Promise<boolean>;
@@ -37,15 +41,20 @@ export function createSupabaseCallStore(supabase: SupabaseClient): CallStore {
       return { tickets, escalations, turns, followUpSeen: followUps > 0, identifiedCustomer: convo.data?.identified_customer_id ?? null };
     },
 
-    async endCall(conversationId, { summary, finalStatus, callerId, costUsd, durationS }) {
+    async endCall(conversationId, { summary, finalStatus, callerId, costUsd, durationS, startedAt, endedAt }) {
+      // A call that failed before reaching the agent has no row yet: the report creates it, with
+      // Vapi's start time (otherwise it would read as starting when the report arrived).
       const { error } = await supabase
         .from("conversations")
-        .upsert({ conversation_id: conversationId, channel: "web" }, { onConflict: "conversation_id", ignoreDuplicates: true });
+        .upsert(
+          { conversation_id: conversationId, channel: "web", ...(startedAt ? { started_at: startedAt } : {}) },
+          { onConflict: "conversation_id", ignoreDuplicates: true },
+        );
       if (error) throw new Error(`conversations: ${error.message}`);
       const { error: updateError } = await supabase
         .from("conversations")
         .update({
-          ended_at: new Date().toISOString(), summary, final_status: finalStatus, caller_id: callerId,
+          ended_at: endedAt ?? new Date().toISOString(), summary, final_status: finalStatus, caller_id: callerId,
           vapi_cost_usd: costUsd, duration_s: durationS === null ? null : Math.round(durationS),
         })
         .eq("conversation_id", conversationId)

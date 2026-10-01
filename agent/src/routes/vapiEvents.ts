@@ -5,6 +5,10 @@ import { log } from "../logger.js";
 // Vapi server-URL events. Only the end-of-call report matters here; everything
 // else is acknowledged and ignored. Redeliveries are safe (endCall and the
 // reconciliation check are idempotent).
+/** A valid timestamp from Vapi's report, or null (never trust an unparseable value into the database). */
+const isoOrNull = (v: unknown): string | null =>
+  typeof v === "string" && !Number.isNaN(Date.parse(v)) ? new Date(v).toISOString() : null;
+
 export function vapiEvents(store: CallStore) {
   return async (req: Request, res: Response) => {
     const message = req.body?.message;
@@ -30,6 +34,8 @@ export function vapiEvents(store: CallStore) {
         // Field names checked against a real report in step 6; anything non-numeric is left empty.
         costUsd: typeof message.cost === "number" ? message.cost : null,
         durationS: typeof message.durationSeconds === "number" ? message.durationSeconds : null,
+        startedAt: isoOrNull(message.startedAt ?? message.call?.startedAt),
+        endedAt: isoOrNull(message.endedAt ?? message.call?.endedAt),
       });
 
       // A record needing follow-up was seen, but no ticket was created (design §4.4).
