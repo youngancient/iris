@@ -18,6 +18,9 @@
     "url": "${AGENT_URL}/vapi/events",
     "timeoutSeconds": 20
   },
+  "analysisPlan": {
+    "summaryPrompt": "Summarise this RelayPay support call for the support team in two or three plain sentences: what the caller wanted, what Iris did (answers, lookups, tickets, escalations, with any IDs), and anything still open. Don't include email addresses or other contact details."
+  },
   "serverMessages": [
     "end-of-call-report"
   ],

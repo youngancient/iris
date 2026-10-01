@@ -20,7 +20,7 @@ export async function signIn(_prev: SignInState, form: FormData): Promise<SignIn
   if (error) return failed;
   // A valid login without the staff role (e.g. a customer) is signed straight back out.
   if (!(await isStaffSession())) {
-    await supabase.auth.signOut();
+    await supabase.auth.signOut({ scope: "local" });
     return failed;
   }
   redirect("/admin/queue");
@@ -28,6 +28,6 @@ export async function signIn(_prev: SignInState, form: FormData): Promise<SignIn
 
 export async function signOut() {
   const supabase = await authClient();
-  await supabase.auth.signOut();
+  await supabase.auth.signOut({ scope: "local" });
   redirect("/admin/login");
 }

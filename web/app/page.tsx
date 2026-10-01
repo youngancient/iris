@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { getSignedInCustomer } from "@/lib/customer";
+import { getMaintenance } from "@/lib/settings";
 import { CallPanel } from "./call-panel";
 import { signOutCustomer } from "./signin/actions";
 
@@ -16,7 +17,11 @@ function Logo() {
 }
 
 export default async function Home() {
-  const customer = await getSignedInCustomer().catch(() => null);
+  const [customer, maintenance] = await Promise.all([
+    getSignedInCustomer().catch(() => null),
+    // If the switch can't be read, show Iris as available: the call-token route and the agent both check it again.
+    getMaintenance().catch(() => null),
+  ]);
   return (
     <div className="flex flex-1 flex-col">
       <header className="border-b border-border bg-surface">
@@ -42,7 +47,7 @@ export default async function Home() {
           transaction or payout, and pass you to a specialist when needed.
         </p>
 
-        <CallPanel signedIn={Boolean(customer)} />
+        <CallPanel signedIn={Boolean(customer)} available={!maintenance?.on} />
 
         <section className="mt-12 grid gap-6 border-t border-border pt-8 text-[14px] leading-6 text-muted sm:grid-cols-2 lg:grid-cols-[minmax(0,5fr)_minmax(0,6fr)] lg:gap-12">
           <div>

@@ -19,7 +19,7 @@ export async function signInCustomer(_prev: CustomerSignInState, form: FormData)
   if (error) return failed;
   // Signed in, but not a customer account (e.g. a staff-only login): don't treat them as one.
   if (!(await getSignedInCustomer())) {
-    await auth.auth.signOut();
+    await auth.auth.signOut({ scope: "local" });
     return { error: "This login isn't linked to a RelayPay customer account." };
   }
   redirect("/");
@@ -27,6 +27,6 @@ export async function signInCustomer(_prev: CustomerSignInState, form: FormData)
 
 export async function signOutCustomer() {
   const auth = await authClient();
-  await auth.auth.signOut();
+  await auth.auth.signOut({ scope: "local" });
   redirect("/");
 }

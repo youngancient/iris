@@ -65,7 +65,7 @@ async function checkMicrophone(): Promise<string | null> {
 
 const clock = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
 
-export function CallPanel({ signedIn }: { signedIn: boolean }) {
+export function CallPanel({ signedIn, available: availableAtLoad }: { signedIn: boolean; available: boolean }) {
   const vapiRef = useRef<Vapi | null>(null);
   const statusRef = useRef<Status>("idle");
   const logRef = useRef<HTMLOListElement | null>(null);
@@ -77,6 +77,8 @@ export function CallPanel({ signedIn }: { signedIn: boolean }) {
   const [partial, setPartial] = useState<Line | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [seconds, setSeconds] = useState(0);
+  // Starts from the page's reading of the kill switch; the call-token route can turn it off later.
+  const [available, setAvailable] = useState(availableAtLoad);
 
   const setStatus = (s: Status) => {
     statusRef.current = s;
@@ -163,7 +165,12 @@ export function CallPanel({ signedIn }: { signedIn: boolean }) {
     try {
       // A short-lived start token: the agent refuses web calls without one (design §8).
       const res = await fetch("/api/call-token", { method: "POST" });
-      const body = (await res.json().catch(() => ({}))) as { token?: string; error?: string };
+      const body = (await res.json().catch(() => ({}))) as { token?: string; error?: string; unavailable?: boolean };
+      if (body.unavailable) {
+        setStatus("idle");
+        setAvailable(false);
+        return;
+      }
       if (!res.ok || !body.token) {
         setStatus("idle");
         setError(body.error ?? CONNECT_FAILED);
@@ -195,6 +202,8 @@ export function CallPanel({ signedIn }: { signedIn: boolean }) {
 
   const statusText = !configured
     ? "Voice calling isn't set up yet."
+    : !available && !inCall
+      ? "Iris is unavailable right now"
     : status === "connecting"
       ? "Connecting to Iris"
       : status === "ending"
@@ -226,7 +235,7 @@ export function CallPanel({ signedIn }: { signedIn: boolean }) {
           <button
             type="button"
             onClick={inCall ? end : start}
-            disabled={!configured || status === "connecting" || status === "ending"}
+            disabled={!configured || (!available && !inCall) || status === "connecting" || status === "ending"}
             aria-label={inCall ? "End call" : "Start call"}
             className={`relative grid h-28 w-28 place-items-center rounded-full text-white transition-colors focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-primary/30 disabled:opacity-60 ${
               inCall ? "bg-danger hover:bg-[#8c3030]" : "bg-primary hover:bg-primary-hover"
@@ -243,8 +252,14 @@ export function CallPanel({ signedIn }: { signedIn: boolean }) {
         <p className="mt-6 text-[17px] font-semibold tracking-tight" aria-live="polite">
           {statusText}
         </p>
-        <p className="mt-1 h-5 text-[14px] tabular-nums text-muted">
-          {inCall ? clock(seconds) : status === "idle" && configured ? "Press the button to start a voice call" : ""}
+        <p className="mt-1 min-h-5 max-w-xs text-center text-[14px] leading-5 tabular-nums text-muted">
+          {inCall
+            ? clock(seconds)
+            : !available
+              ? "You can still reach support from your RelayPay dashboard."
+              : status === "idle" && configured
+                ? "Press the button to start a voice call"
+                : ""}
         </p>
 
         <div className="mt-6 flex h-10 gap-2">
@@ -258,7 +273,7 @@ export function CallPanel({ signedIn }: { signedIn: boolean }) {
               {muted ? "Unmute" : "Mute"}
             </button>
           )}
-          {status === "ended" && (
+          {status === "ended" && available && (
             <button
               type="button"
               onClick={start}

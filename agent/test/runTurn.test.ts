@@ -176,6 +176,31 @@ describe("runTurn", () => {
     expect(store.turns.get("call-1:0")?.result?.answerType).toBe("social");
   });
 
+  it("an untagged reply still gets a type: a closing question is a clarification", async () => {
+    const { deps, store } = setup([{ type: "text", text: "I heard x x x at gmail dot com. Is that right?" }, result]);
+    await collect(runTurn(deps, req("X x x at g mail dot com.")));
+    const turn = store.turns.get("call-1:0")?.result;
+    expect(turn?.answerType).toBe("clarify");
+    expect(turn?.confidenceNote).toBe("untagged");
+    expect(store.events.map((e) => e.type)).toContain("clarification_requested");
+  });
+
+  it("explaining an earlier ticket isn't flagged as ungrounded", async () => {
+    const noMatch: RetrievalResult = { chunks: [], matched: false, method: "vector", topScore: 0.28 };
+    const { deps, store } = setup([{ type: "text", text: "I logged it so support can follow up. [[type:answer;confidence:high]]" }, result], noMatch);
+    store.prior = { identifiedCustomer: null, tickets: [{ id: "TKT-1", turn: 5 }], escalations: [] };
+    await collect(runTurn(deps, req("Why did you log a ticket?")));
+    expect(store.events.map((e) => e.type)).not.toContain("ungrounded_answer");
+  });
+
+  it("an unrelated answer with nothing behind it is still flagged, even after a ticket", async () => {
+    const noMatch: RetrievalResult = { chunks: [], matched: false, method: "vector", topScore: 0.1 };
+    const { deps, store } = setup([{ type: "text", text: "Our office is open on Sundays. [[type:answer;confidence:high]]" }, result], noMatch);
+    store.prior = { identifiedCustomer: null, tickets: [{ id: "TKT-1", turn: 5 }], escalations: [] };
+    await collect(runTurn(deps, req("Are you open on Sundays?")));
+    expect(store.events.map((e) => e.type)).toContain("ungrounded_answer");
+  });
+
   it("blocks internal notes from a tool result, and logs the block without the text", async () => {
     const { deps, store } = setup([
       { type: "text", text: "Let me check that. " },
@@ -313,7 +338,7 @@ describe("runTurn", () => {
   it("kill switch on: the fixed unavailable line, and the model is never called", async () => {
     const { deps, prompts, store } = setup([{ type: "text", text: "Hello. [[type:answer;confidence:high]]" }, result]);
     const out = await collect(runTurn({ ...deps, maintenance: async () => true }, req("What fees do you charge?")));
-    expect(out).toEqual(["Support is temporarily unavailable. Please use your RelayPay dashboard."]);
+    expect(out).toEqual(["Support is temporarily unavailable. Please use your RelayPay dashboard. This call will now end."]);
     expect(prompts).toHaveLength(0);
     expect(store.turns.get("call-1:0")?.result).toMatchObject({ confidenceNote: "maintenance" });
   });

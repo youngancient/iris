@@ -17,7 +17,8 @@ export function vapiEvents(store: CallStore) {
     // Why Vapi ended the call: the only trace when it fails before reaching the agent.
     const endedReason = typeof message.endedReason === "string" ? message.endedReason : null;
     const normalEnd = endedReason && /^(customer-ended-call|assistant-ended-call|assistant-said-end-call-phrase|exceeded-max-duration)$/.test(endedReason);
-    log[normalEnd ? "info" : "warn"]({ conversation_id: callId, ended_reason: endedReason, duration_s: message.durationSeconds ?? null }, "call ended");
+    const hasSummary = Boolean(message.analysis?.summary ?? message.summary);
+    log[normalEnd ? "info" : "warn"]({ conversation_id: callId, ended_reason: endedReason, duration_s: message.durationSeconds ?? null, has_summary: hasSummary }, "call ended");
 
     try {
       const summary = await store.summarize(callId);

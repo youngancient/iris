@@ -1,6 +1,7 @@
 import type { TurnResult, TurnStore } from "../logging/turnStore.js";
 import {
   classifyInput,
+  type GateClass,
   isDataOnly,
   priorUnintelligibleCount,
   UNINTELLIGIBLE_LIMIT,
@@ -8,7 +9,7 @@ import {
   UNINTELLIGIBLE_REPLY,
 } from "./inputGate.js";
 import type { ModelEvent, ModelRunner } from "./modelRunner.js";
-import { TagStripper } from "./outcomeTag.js";
+import { TagStripper, type AnswerType } from "./outcomeTag.js";
 import { formatForPrompt, type RetrievalResult, type RetrievalScope } from "./retrieval.js";
 import { checkSentence, GUARD_FALLBACK, internalSegments, SentenceSplitter, type InternalText } from "./speechGuard.js";
 import { buildTurnPrompt, PROMPT_VERSION } from "./systemPrompt.js";
@@ -16,14 +17,25 @@ import { log } from "../logger.js";
 
 // One spoken turn (design §2). Yields sentences as they pass the speech guard.
 
+// The caller asking about a ticket, escalation or something Iris said or did earlier in the call.
+const EARLIER_ACTION = /\b(ticket|escalat\w*|specialist|why did you|you (said|did|logged|created|made|opened|raised))\b/i;
+
+/** Best guess for a reply the model didn't tag: a closing question means clarify, otherwise answer. */
+function inferAnswerType(spoken: string[], gate: GateClass): AnswerType {
+  if (gate === "small_talk") return "social";
+  const last = spoken.filter((s) => s !== LOOKUP_ACK && s !== STALL_REPLY).at(-1) ?? "";
+  return last.trim().endsWith("?") ? "clarify" : "answer";
+}
+
 export const HOLDING_REPLY = "One moment, I'm still working on that.";
 export const FAILURE_REPLY =
   "I'm having trouble right now. Please try again in a few minutes, or contact support from your RelayPay dashboard.";
 export const LOOKUP_ACK = "Let me check that for you.";
 export const STALL_REPLY = "Sorry, just a moment.";
-export const MAINTENANCE_REPLY = "Support is temporarily unavailable. Please use your RelayPay dashboard.";
 // Vapi hangs up when the assistant says this (endCallPhrases in vapi/assistant.json).
 export const END_CALL_PHRASE = "This call will now end.";
+// Stopped from the dashboard: said once, then the call ends.
+export const MAINTENANCE_REPLY = `Support is temporarily unavailable. Please use your RelayPay dashboard. ${END_CALL_PHRASE}`;
 export const COST_CAP_REPLY = `I've reached the limit for this call. Please contact support from your RelayPay dashboard. ${END_CALL_PHRASE}`;
 
 // No model activity after 8s: say a holding line and keep waiting (occasionally the
@@ -347,7 +359,9 @@ export async function* runTurn(deps: TurnDeps, req: TurnRequest): AsyncGenerator
     yield fallback;
   }
 
-  const outcome = stripper.outcome();
+  // A missing tag still gets a type, so the turn's events are logged; confidence stays "untagged" to show it.
+  const tagged = stripper.outcome();
+  const outcome = tagged.answerType ? tagged : { ...tagged, answerType: inferAnswerType(spoken, gate) };
   const topScore = retrieved?.topScore;
   const result: TurnResult = {
     assistantResponse: spoken.join(" "),
@@ -381,7 +395,11 @@ export async function* runTurn(deps: TurnDeps, req: TurnRequest): AsyncGenerator
     );
   }
   // An answer with neither matching knowledge nor a tool result behind it (design §4.4).
-  if (outcome.answerType === "answer" && !retrieved?.matched && !kbSearched && !toolSucceeded && gate !== "small_talk") {
+  // A question about what Iris already did in this call is grounded in the call's own records.
+  const done = await priorActions;
+  const aboutEarlierActions =
+    Boolean(done && done.tickets.length + done.escalations.length > 0) && EARLIER_ACTION.test(latest);
+  if (outcome.answerType === "answer" && !retrieved?.matched && !kbSearched && !toolSucceeded && gate !== "small_talk" && !aboutEarlierActions) {
     await safely("ungrounded event", () =>
       store.event(conv, "ungrounded_answer", "Answered without matching knowledge or a tool result.", { turn_index: turnIndex }),
     );

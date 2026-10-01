@@ -2,6 +2,7 @@ import { createClient } from "@supabase/supabase-js";
 import { hashIp, issueCallToken } from "@/lib/callToken";
 import { getSignedInCustomer } from "@/lib/customer";
 import { callTokenEnv } from "@/lib/env";
+import { getMaintenance } from "@/lib/settings";
 
 // Issues a short-lived token the call page passes to Vapi; the agent refuses web calls
 // without one (design §8). Rate-limited per visitor so the page can't be used to start
@@ -9,6 +10,8 @@ import { callTokenEnv } from "@/lib/env";
 // CALL_TOKENS_PER_HOUR raises it for local testing (1-100, default 5).
 const configured = Number(process.env.CALL_TOKENS_PER_HOUR);
 const LIMIT_PER_HOUR = Number.isInteger(configured) && configured >= 1 && configured <= 100 ? configured : 5;
+
+const UNAVAILABLE = "Iris is unavailable right now. You can still reach support from your RelayPay dashboard.";
 
 const json = (status: number, body: unknown) =>
   new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json", "cache-control": "no-store" } });
@@ -26,6 +29,10 @@ export async function POST(request: Request) {
     console.error(String(err));
     return json(503, { error: "Calling isn't available right now." });
   }
+
+  // Stopped from the dashboard: don't start a call that would only hear the unavailable message.
+  const maintenance = await getMaintenance().catch(() => null);
+  if (maintenance?.on) return json(503, { error: UNAVAILABLE, unavailable: true });
 
   const ip = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || request.headers.get("x-real-ip") || "unknown";
   const ipHash = hashIp(env.callTokenSecret, ip);

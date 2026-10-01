@@ -42,7 +42,9 @@ export async function setKillSwitch(_prev: KillSwitchResult | null, form: FormDa
     await db.from("admin_actions").insert({ admin_email: admin.email, action: "reauth_failed", after_value: "kill_switch" });
     return { ok: false, message: "That password isn't right." };
   }
-  await checker.auth.signOut().catch(() => {});
+  // "local" ends only the session this check just created. The default ("global") revokes every
+  // session for the user, which signed the admin out of the dashboard too.
+  await checker.auth.signOut({ scope: "local" }).catch(() => {});
 
   // Conditional on the state the admin saw, so two people can't flip it past each other.
   const { data, error } = await db
