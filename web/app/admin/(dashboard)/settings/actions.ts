@@ -17,6 +17,20 @@ const LOCKOUT_ATTEMPTS = 5;
 const LOCKOUT_MS = 15 * 60 * 1000;
 
 export async function setKillSwitch(_prev: KillSwitchResult | null, form: FormData): Promise<KillSwitchResult> {
+  // Anything thrown here would replace the dashboard with Next's generic error page, so it's
+  // logged and turned into a message the dialog can show.
+  try {
+    return await changeKillSwitch(form);
+  } catch (err) {
+    console.error("kill switch action failed", err);
+    if (err instanceof Error && err.message === "Not authorised") {
+      return { ok: false, message: "Your session has expired. Sign in again, then retry." };
+    }
+    return { ok: false, message: "The switch couldn't be changed right now. Try again in a moment." };
+  }
+}
+
+async function changeKillSwitch(form: FormData): Promise<KillSwitchResult> {
   const admin = await requireAdmin();
   const parsed = Input.safeParse({ turnOn: form.get("turnOn"), reason: form.get("reason"), password: form.get("password") });
   if (!parsed.success) return { ok: false, message: parsed.error.issues[0]?.message ?? "Check the form and try again." };
