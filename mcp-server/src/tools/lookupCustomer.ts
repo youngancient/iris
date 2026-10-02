@@ -8,9 +8,9 @@ import { identitySwitchBlocked } from "./limits.js";
 
 const description =
   "Use this tool when the user provides enough safe identifying information to find a customer record. " +
-  "Accepts customer_id, email and company_name. Account details (plan, account_status, kyc_status, support_notes) " +
-  "are only returned when the caller is signed in on the RelayPay page as that customer; otherwise they come back " +
-  "empty and the caller must sign in to discuss their account. support_notes is internal guidance: act on it, never read it aloud.";
+  "Accepts customer_id, email and company_name. Only returns the signed-in caller's own account: if the caller " +
+  "isn't signed in on the RelayPay page, or asks about another customer, it comes back as found: false. " +
+  "support_notes is internal guidance: act on it, never read it aloud.";
 
 const inputSchema = {
   customer_id: z.string().optional(),
@@ -65,17 +65,13 @@ export function register(server: McpServer, ctx: ToolContext) {
         // Identity comes only from signing in on the RelayPay page (design §5.2): the call-start
         // token sets it server-side. Nothing a caller says can unlock account details.
         const signedInAs = ctx.conversationId ? await ctx.db.identifiedCustomer(ctx.conversationId) : null;
-        if (signedInAs && signedInAs !== customer.customer_id) {
+        if (!ctx.operator && signedInAs && signedInAs !== customer.customer_id) {
           // Signed in as one customer, asking about another: reveal nothing (identity lock).
           await identitySwitchBlocked(ctx, signedInAs, customer.customer_id);
           return { status: "not_found", data: notFound };
         }
-        if (signedInAs !== customer.customer_id) {
-          return {
-            status: "success",
-            data: { ...notFound, found: true, customer_id: customer.customer_id, company_name: customer.company_name },
-          };
-        }
+        // Not signed in: nothing, not even that the account exists. They sign in to discuss it.
+        if (!ctx.operator && signedInAs !== customer.customer_id) return { status: "not_found", data: notFound };
 
         const data: Output = {
           found: true,

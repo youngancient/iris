@@ -1,5 +1,5 @@
 -- Seed data: the provided RelayPay records (artifact/assets/seed-data/*.csv),
--- plus demo customers with real, reachable emails (CUS-1006, CUS-1007) for live testing.
+-- plus a demo customer (CUS-1006) for live testing as a signed-in caller.
 -- Run in the Supabase SQL editor after migrations 001-003. Safe to re-run (upserts).
 
 insert into customers (customer_id, company_name, contact_name, contact_email, plan, account_status, region, kyc_status, support_notes) values
@@ -24,19 +24,14 @@ insert into payouts (payout_id, transaction_id, customer_id, recipient_name, amo
   ('PAY-7003', 'TXN-9004', 'CUS-1004', 'Mwiza Design', '800', 'USD', 'failed', '2026-08-15', 'beneficiary details need review')
 on conflict (payout_id) do update set transaction_id = excluded.transaction_id, customer_id = excluded.customer_id, recipient_name = excluded.recipient_name, amount = excluded.amount, currency = excluded.currency, status = excluded.status, scheduled_for = excluded.scheduled_for, failure_reason = excluded.failure_reason;
 
--- Demo customers with real emails, so emails to the customer (e.g. one-time codes) can be received.
--- CUS-1006: a normal payout in progress. CUS-1007: a failed invoice payment and a payout needing review.
+-- Demo customer for signed-in calls. CUS-1006: a normal payout in progress.
 insert into customers (customer_id, company_name, contact_name, contact_email, plan, account_status, region, kyc_status, support_notes) values
-  ('CUS-1006', 'OkoyeWorks', 'Jude Okoye', 'judetochyxyz@gmail.com', 'Growth', 'active', 'Nigeria', 'approved', 'Customer has an active account and normal support access.'),
-  ('CUS-1007', 'OdusileHQ', 'Tofunmi Odusile', 'tofunmiodusile@gmail.com', 'Starter', 'active', 'Nigeria', 'approved', 'Customer has an active account and normal support access.')
+  ('CUS-1006', 'OkoyeWorks', 'Jude Okoye', 'judetochyxyz@gmail.com', 'Growth', 'active', 'Nigeria', 'approved', 'Customer has an active account and normal support access.')
 on conflict (customer_id) do update set company_name = excluded.company_name, contact_name = excluded.contact_name, contact_email = excluded.contact_email, plan = excluded.plan, account_status = excluded.account_status, region = excluded.region, kyc_status = excluded.kyc_status, support_notes = excluded.support_notes;
 insert into transactions (transaction_id, customer_id, transaction_type, amount, currency, destination_country, status, created_at, estimated_arrival, support_summary) values
-  ('TXN-9006', 'CUS-1006', 'outgoing payout', 1500, 'USD', 'Ghana', 'processing', '2026-08-17', '2026-08-20', 'Payout is processing within the normal expected window.'),
-  ('TXN-9007', 'CUS-1007', 'invoice payment', 950, 'GBP', 'Nigeria', 'failed', '2026-08-15', null, 'Invoice payment failed. The payer''s bank declined the payment.'),
-  ('TXN-9008', 'CUS-1007', 'outgoing payout', 2200, 'EUR', 'Kenya', 'review required', '2026-08-16', null, 'Payout requires additional review before it can be released.')
+  ('TXN-9006', 'CUS-1006', 'outgoing payout', 1500, 'USD', 'Ghana', 'processing', '2026-08-17', '2026-08-20', 'Payout is processing within the normal expected window.')
 on conflict (transaction_id) do update set customer_id = excluded.customer_id, transaction_type = excluded.transaction_type, amount = excluded.amount, currency = excluded.currency, destination_country = excluded.destination_country, status = excluded.status, created_at = excluded.created_at, estimated_arrival = excluded.estimated_arrival, support_summary = excluded.support_summary;
 
 insert into payouts (payout_id, transaction_id, customer_id, recipient_name, amount, currency, status, scheduled_for, failure_reason) values
-  ('PAY-7004', 'TXN-9006', 'CUS-1006', 'Adwoa Creative', 1500, 'USD', 'processing', '2026-08-19', null),
-  ('PAY-7005', 'TXN-9008', 'CUS-1007', 'Safari Dev Co', 2200, 'EUR', 'review required', '2026-08-18', 'additional review')
+  ('PAY-7004', 'TXN-9006', 'CUS-1006', 'Adwoa Creative', 1500, 'USD', 'processing', '2026-08-19', null)
 on conflict (payout_id) do update set transaction_id = excluded.transaction_id, customer_id = excluded.customer_id, recipient_name = excluded.recipient_name, amount = excluded.amount, currency = excluded.currency, status = excluded.status, scheduled_for = excluded.scheduled_for, failure_reason = excluded.failure_reason;

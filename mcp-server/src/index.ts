@@ -46,7 +46,8 @@ const db = createSupabaseDb(config.supabaseUrl, config.supabaseKey);
 
 if (stdio) {
   // Local dev only: one conversation for the life of the process.
-  const server = buildServer({ db, conversationId: process.env.MCP_CONVERSATION_ID?.trim() || null, turnIndex: null });
+  // A local operator, not a caller: sees every record (see ToolContext.operator).
+  const server = buildServer({ db, conversationId: process.env.MCP_CONVERSATION_ID?.trim() || null, turnIndex: null, operator: true });
   await server.connect(new StdioServerTransport());
   log.info("relaypay-support MCP server running on stdio");
 } else {

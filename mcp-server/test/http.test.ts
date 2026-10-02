@@ -43,8 +43,9 @@ describe("HTTP transport", () => {
       callTool("lookup_transaction", { transaction_id: "TXN-9001" }),
     );
     expect(res.status).toBe(200);
+    // That call isn't signed in, so the record isn't returned; the binding to the call is what's tested here.
     const body = (await res.json()) as { result: { structuredContent: { found: boolean } } };
-    expect(body.result.structuredContent.found).toBe(true);
+    expect(body.result.structuredContent.found).toBe(false);
     expect(db.toolCalls.at(-1)).toMatchObject({ conversation_id: "call-123", turn_index: 2 });
   });
 

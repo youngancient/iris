@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { verifyAdmin } from "@/lib/dal";
-import { dateTime, STATUS_LABEL, timeAgo } from "@/lib/format";
+import { customerLabel, dateTime, STATUS_LABEL, timeAgo, type CustomerName } from "@/lib/format";
 import { adminDb } from "@/lib/supabase";
 import { StatusForm } from "./status-form";
 
@@ -13,10 +13,12 @@ const ticketRail = (priority: string) => (priority === "urgent" || priority === 
 type Escalation = {
   escalation_id: string; conversation_id: string | null; ticket_id: string | null; customer_id: string | null; user_name: string | null;
   user_email: string | null; category: string; reason: string; preferred_time: string | null; status: string; created_at: string; staff_note: string | null;
+  customers: CustomerName;
 };
 type Ticket = {
   ticket_id: string; conversation_id: string | null; customer_id: string | null; transaction_id: string | null; category: string;
   priority: string; summary: string; status: string; created_at: string; staff_note: string | null;
+  customers: CustomerName;
 };
 
 export default async function QueuePage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
@@ -29,11 +31,11 @@ export default async function QueuePage({ searchParams }: { searchParams: Promis
   const db = adminDb();
   let escQuery = db
     .from("escalations")
-    .select("escalation_id, conversation_id, ticket_id, customer_id, user_name, user_email, category, reason, preferred_time, status, created_at, staff_note")
+    .select("escalation_id, conversation_id, ticket_id, customer_id, user_name, user_email, category, reason, preferred_time, status, created_at, staff_note, customers(company_name, contact_name)")
     .in("status", statuses).order("created_at", { ascending: false }).limit(LIMIT);
   let ticketQuery = db
     .from("support_tickets")
-    .select("ticket_id, conversation_id, customer_id, transaction_id, category, priority, summary, status, created_at, staff_note")
+    .select("ticket_id, conversation_id, customer_id, transaction_id, category, priority, summary, status, created_at, staff_note, customers(company_name, contact_name)")
     .in("status", statuses).order("created_at", { ascending: false }).limit(LIMIT);
   // Test (eval) conversations are hidden unless asked for.
   if (!includeTests) {
@@ -43,8 +45,9 @@ export default async function QueuePage({ searchParams }: { searchParams: Promis
     ticketQuery = ticketQuery.or(notTest);
   }
   const [esc, tickets] = await Promise.all([escQuery, ticketQuery]);
-  const escalations = (esc.data ?? []) as Escalation[];
-  const ticketRows = (tickets.data ?? []) as Ticket[];
+  // A many-to-one embed is one object at runtime; the untyped client types it as an array.
+  const escalations = (esc.data ?? []) as unknown as Escalation[];
+  const ticketRows = (tickets.data ?? []) as unknown as Ticket[];
   const failed = esc.error || tickets.error;
 
   const tab = (label: string, href: string, active: boolean) => (
@@ -86,7 +89,7 @@ export default async function QueuePage({ searchParams }: { searchParams: Promis
               <dl className="mt-2 grid gap-x-6 gap-y-1 text-[13px] text-muted sm:grid-cols-3">
                 <div><dt className="inline">Email: </dt><dd className="inline text-foreground">{e.user_email ?? "—"}</dd></div>
                 <div><dt className="inline">Callback: </dt><dd className="inline text-foreground">{e.preferred_time || "No time given"}</dd></div>
-                <div><dt className="inline">Account: </dt><dd className="inline text-foreground">{e.customer_id ?? "Not verified"}</dd></div>
+                <div><dt className="inline">Account: </dt><dd className="inline text-foreground">{e.customer_id ? customerLabel(e.customer_id, e.customers) : "Caller not signed in"}</dd></div>
               </dl>
               <p className="mt-2 text-[13px] text-muted">
                 {e.escalation_id}{e.ticket_id ? ` · ticket ${e.ticket_id}` : ""}
@@ -110,7 +113,7 @@ export default async function QueuePage({ searchParams }: { searchParams: Promis
               </div>
               <p className="mt-1 text-[14px]">{t.summary}</p>
               <p className="mt-2 text-[13px] text-muted">
-                {t.ticket_id} · {t.customer_id ?? "Account not verified"}{t.transaction_id ? ` · ${t.transaction_id}` : ""}
+                {t.ticket_id} · {t.customer_id ? customerLabel(t.customer_id, t.customers) : "Caller not signed in"}{t.transaction_id ? ` · ${t.transaction_id}` : ""}
                 {t.conversation_id && (<> · <Link className="text-primary underline" href={`/admin/conversations/${encodeURIComponent(t.conversation_id)}`}>See the call</Link></>)}
               </p>
               <StatusForm kind="ticket" id={t.ticket_id} status={t.status} note={t.staff_note} />

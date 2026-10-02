@@ -4,17 +4,17 @@ import { connect, customers, seededDb, transactions } from "./helpers.js";
 const AMARA = { company_name: "LagosLedger", email: "amara@lagosledger.example" };
 
 describe("lookup_customer: identity comes only from signing in (design §5.2)", () => {
-  const PARTIAL = { found: true, customer_id: "CUS-1001", company_name: "LagosLedger", plan: "", account_status: "", kyc_status: "", support_notes: "" };
+  const NOTHING = { found: false, customer_id: "", company_name: "", plan: "", account_status: "", kyc_status: "", support_notes: "" };
 
-  it("not signed in: company name finds the account, but account fields stay empty", async () => {
+  it("not signed in: a company name reveals nothing, not even that the account exists", async () => {
     const { call } = await connect(seededDb());
-    expect((await call("lookup_customer", { company_name: "LagosLedger" })).data).toEqual(PARTIAL);
+    expect((await call("lookup_customer", { company_name: "LagosLedger" })).data).toEqual(NOTHING);
   });
 
-  it("not signed in: company + the right email still doesn't unlock details, and doesn't verify the call", async () => {
+  it("not signed in: company + the right email still reveals nothing, and doesn't verify the call", async () => {
     const db = seededDb();
     const { call } = await connect(db);
-    expect((await call("lookup_customer", AMARA)).data).toEqual(PARTIAL);
+    expect((await call("lookup_customer", AMARA)).data).toEqual(NOTHING);
     expect(await db.identifiedCustomer("conv-1")).toBeNull();
   });
 
@@ -53,19 +53,18 @@ describe("lookup_customer: identity comes only from signing in (design §5.2)", 
 });
 
 describe("lookup_transaction ownership (design §5.2)", () => {
-  it("caller not signed in: status and summary, but no amount or customer_id", async () => {
+  it("caller not signed in: not found, even for a real reference (nothing to guess at)", async () => {
     const { call } = await connect(seededDb());
-    const { data } = await call("lookup_transaction", { transaction_id: "TXN-9001" });
-    expect(data).toMatchObject({
-      found: true, status: "processing", type: "outgoing payout", amount: "", customer_id: "",
-      estimated_arrival: "2026-08-19", support_summary: transactions[0].support_summary,
-    });
+    expect((await call("lookup_transaction", { transaction_id: "TXN-9001" })).data.found).toBe(false);
   });
 
   it("signed-in owner: everything", async () => {
     const { call } = await connect(seededDb(), "conv-1", "CUS-1001");
     const { data } = await call("lookup_transaction", { transaction_id: "TXN-9001" });
-    expect(data).toMatchObject({ amount: "2400", customer_id: "CUS-1001", currency: "USD" });
+    expect(data).toMatchObject({
+      found: true, status: "processing", type: "outgoing payout", amount: "2400", customer_id: "CUS-1001", currency: "USD",
+      estimated_arrival: "2026-08-19", support_summary: transactions[0].support_summary,
+    });
   });
 
   it("signed in as a different customer: not found (doesn't reveal the record exists)", async () => {
@@ -75,21 +74,31 @@ describe("lookup_transaction ownership (design §5.2)", () => {
   });
 
   it("normalises spoken references", async () => {
-    const { call } = await connect(seededDb());
+    const { call } = await connect(seededDb(), "conv-1", "CUS-1001");
     for (const ref of ["txn 9001", "T X N nine zero zero one", "TXN.9001", "9001"]) {
       expect((await call("lookup_transaction", { transaction_id: ref })).data.transaction_id).toBe("TXN-9001");
     }
   });
 
   it("returns empty estimated_arrival rather than inventing one", async () => {
-    const { call } = await connect(seededDb());
+    const { call } = await connect(seededDb(), "conv-1", "CUS-1003");
     expect((await call("lookup_transaction", { transaction_id: "TXN-9003" })).data.estimated_arrival).toBe("");
   });
 });
 
 describe("lookup_payout", () => {
-  it("PAY-7002 needs review, with the linked transaction's summary", async () => {
+  it("caller not signed in: not found, even for a real payout", async () => {
     const { call } = await connect(seededDb());
+    expect((await call("lookup_payout", { payout_id: "PAY-7002" })).data.found).toBe(false);
+  });
+
+  it("signed in as a different customer: not found", async () => {
+    const { call } = await connect(seededDb(), "conv-1", "CUS-1001");
+    expect((await call("lookup_payout", { payout_id: "PAY-7002" })).data.found).toBe(false);
+  });
+
+  it("PAY-7002 needs review, with the linked transaction's summary (signed in as its owner)", async () => {
+    const { call } = await connect(seededDb(), "conv-1", "CUS-1003");
     const { data } = await call("lookup_payout", { payout_id: "PAY-7002" });
     expect(data).toMatchObject({
       found: true, status: "review required", failure_reason: "compliance review",
@@ -98,7 +107,7 @@ describe("lookup_payout", () => {
   });
 
   it("finds a payout by its transaction", async () => {
-    const { call } = await connect(seededDb());
+    const { call } = await connect(seededDb(), "conv-1", "CUS-1004");
     expect((await call("lookup_payout", { transaction_id: "TXN-9004" })).data.payout_id).toBe("PAY-7003");
   });
 
@@ -252,7 +261,7 @@ describe("logging and failures", () => {
     await call("lookup_customer", AMARA);
     await new Promise((r) => setTimeout(r, 0));
     expect(db.toolCalls).toHaveLength(1);
-    expect(db.toolCalls[0]).toMatchObject({ tool_name: "lookup_customer", status: "success", conversation_id: "conv-1" });
+    expect(db.toolCalls[0]).toMatchObject({ tool_name: "lookup_customer", status: "not_found", conversation_id: "conv-1" });
     expect(JSON.stringify(db.toolCalls[0].input_summary)).toContain("a***@lagosledger.example");
     expect(JSON.stringify(db.toolCalls[0])).not.toContain("amara@");
   });

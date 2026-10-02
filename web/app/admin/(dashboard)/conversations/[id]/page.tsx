@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { verifyAdmin } from "@/lib/dal";
-import { dateTime, money, seconds } from "@/lib/format";
+import { customerLabel, dateTime, money, seconds, type CustomerName } from "@/lib/format";
 import { ANSWER_LABEL, eventLabel, HIDDEN_EVENTS, OUTCOME_LABEL, toolLabel } from "@/lib/labels";
 import { adminDb } from "@/lib/supabase";
 
@@ -19,7 +19,7 @@ export default async function ConversationPage({ params }: { params: Promise<{ i
   const db = adminDb();
   const by = (table: string, cols: string) => db.from(table).select(cols).eq("conversation_id", id).order("created_at").limit(500);
   const [convo, turns, tools, events, retrievals] = await Promise.all([
-    db.from("conversations").select("*").eq("conversation_id", id).maybeSingle(),
+    db.from("conversations").select("*, customers(company_name, contact_name)").eq("conversation_id", id).maybeSingle(),
     by("conversation_turns", "created_at, turn_index, user_transcript, assistant_response, answer_type, timings, cost_usd"),
     by("tool_calls", "created_at, tool_name, status, input_summary, result_summary, duration_ms"),
     by("conversation_events", "created_at, event_type"),
@@ -63,7 +63,7 @@ export default async function ConversationPage({ params }: { params: Promise<{ i
       <Link href="/admin/conversations" className="text-[14px] text-primary underline">← All conversations</Link>
       <h1 className="mt-3 text-xl font-semibold">Call on {dateTime(c.started_at)}</h1>
       <p className="mt-1 text-[14px] text-muted">
-        {c.identified_customer_id ? `Verified as ${c.identified_customer_id}` : "Caller not verified"} ·{" "}
+        {c.identified_customer_id ? `Signed in as ${customerLabel(c.identified_customer_id, c.customers as CustomerName)}` : "Caller not signed in"} ·{" "}
         {c.ended_at ? OUTCOME_LABEL[c.final_status ?? ""] ?? "Finished" : "In progress or not reported"}
         {c.channel !== "web" && " · test call"}
       </p>

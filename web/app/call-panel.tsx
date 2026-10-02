@@ -405,7 +405,7 @@ export function CallPanel({ signedIn, available: availableAtLoad }: { signedIn: 
         <p className="mt-8 max-w-xs text-center text-[13px] leading-5 text-muted">
           {signedIn
             ? "You're signed in, so Iris can look at your account with you."
-            : "You're not signed in. Iris can answer general questions; sign in to talk about your account."}
+            : "You're not signed in. Iris can answer general questions; sign in to check your account, payments or payouts."}
         </p>
       </section>
 

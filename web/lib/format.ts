@@ -28,3 +28,12 @@ export function seconds(ms: number | null | undefined): string {
 }
 
 export const STATUS_LABEL: Record<string, string> = { open: "Open", "in progress": "In progress", closed: "Closed" };
+
+/** The customer embedded by `customers(company_name, contact_name)` in a select. */
+export type CustomerName = { company_name: string | null; contact_name: string | null } | null;
+
+/** "Amara Okafor, LagosLedger (CUS-1001)", falling back to whatever is known. */
+export function customerLabel(id: string, customer: CustomerName): string {
+  const who = [customer?.contact_name, customer?.company_name].filter(Boolean).join(", ");
+  return who ? `${who} (${id})` : id;
+}

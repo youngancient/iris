@@ -20,12 +20,20 @@ import { log } from "../logger.js";
 // The caller asking about a ticket, escalation or something Iris said or did earlier in the call.
 const EARLIER_ACTION = /\b(ticket|escalat\w*|specialist|why did you|you (said|did|logged|created|made|opened|raised))\b/i;
 
-/** Best guess for a reply the model didn't tag: a closing question means clarify, otherwise answer. */
-function inferAnswerType(spoken: string[], gate: GateClass): AnswerType {
+/**
+ * Best guess for a reply the model didn't tag. A reply after a successful lookup is an answer, even
+ * when it ends with "anything else?". Otherwise a closing question means clarify. (A knowledge match
+ * isn't used: it shows the caller's words resembled some knowledge, not that the reply used it.)
+ */
+function inferAnswerType(spoken: string[], gate: GateClass, grounded: boolean): AnswerType {
   if (gate === "small_talk") return "social";
+  if (grounded) return "answer";
   const last = spoken.filter((s) => s !== LOOKUP_ACK && s !== STALL_REPLY).at(-1) ?? "";
   return last.trim().endsWith("?") ? "clarify" : "answer";
 }
+
+// A follow-up about a record already looked up in this call ("can you guarantee it arrives then?").
+const ABOUT_A_RECORD = /\b(payouts?|transactions?|payments?|arriv\w*|status|records?|guarantee\w*|on track|late)\b/i;
 
 export const HOLDING_REPLY = "One moment, I'm still working on that.";
 export const FAILURE_REPLY =
@@ -361,7 +369,9 @@ export async function* runTurn(deps: TurnDeps, req: TurnRequest): AsyncGenerator
 
   // A missing tag still gets a type, so the turn's events are logged; confidence stays "untagged" to show it.
   const tagged = stripper.outcome();
-  const outcome = tagged.answerType ? tagged : { ...tagged, answerType: inferAnswerType(spoken, gate) };
+  const outcome = tagged.answerType
+    ? tagged
+    : { ...tagged, answerType: inferAnswerType(spoken, gate, toolSucceeded) };
   const topScore = retrieved?.topScore;
   const result: TurnResult = {
     assistantResponse: spoken.join(" "),
@@ -398,7 +408,8 @@ export async function* runTurn(deps: TurnDeps, req: TurnRequest): AsyncGenerator
   // A question about what Iris already did in this call is grounded in the call's own records.
   const done = await priorActions;
   const aboutEarlierActions =
-    Boolean(done && done.tickets.length + done.escalations.length > 0) && EARLIER_ACTION.test(latest);
+    (Boolean(done && done.tickets.length + done.escalations.length > 0) && EARLIER_ACTION.test(latest)) ||
+    (Boolean(done?.lookupsFound) && ABOUT_A_RECORD.test(latest));
   if (outcome.answerType === "answer" && !retrieved?.matched && !kbSearched && !toolSucceeded && gate !== "small_talk" && !aboutEarlierActions) {
     await safely("ungrounded event", () =>
       store.event(conv, "ungrounded_answer", "Answered without matching knowledge or a tool result.", { turn_index: turnIndex }),

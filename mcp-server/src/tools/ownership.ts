@@ -13,6 +13,14 @@ export function accessFrom(identified: string | null, recordCustomerId: string |
   return identified === recordCustomerId ? "owner" : "other_customer";
 }
 
+/**
+ * Whether this request may see a record owned by recordCustomerId: only its signed-in owner, or a
+ * local stdio operator. Everyone else (signed out, or signed in as someone else) gets not found.
+ */
+export function maySee(ctx: ToolContext, identified: string | null, recordCustomerId: string | null): boolean {
+  return ctx.operator === true || accessFrom(identified, recordCustomerId) === "owner";
+}
+
 /** Who this call is identified as. Start it alongside the record read, not after it. */
 export function identifiedFor(ctx: ToolContext): Promise<string | null> {
   return ctx.conversationId ? ctx.db.identifiedCustomer(ctx.conversationId) : Promise.resolve(null);

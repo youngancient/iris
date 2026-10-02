@@ -28,6 +28,10 @@ export type TurnResult = {
 /** What this call has already done, from our own records (never from the model). */
 export type PriorActions = {
   identifiedCustomer: string | null;
+  /** The signed-in customer's company, so Iris can say who the caller is signed in as. */
+  identifiedCompany?: string | null;
+  /** Lookups earlier in this call that found a record: later answers about them are grounded. */
+  lookupsFound?: number;
   tickets: { id: string; turn: number | null }[];
   escalations: { id: string; turn: number | null }[];
 };
@@ -88,21 +92,28 @@ export function createSupabaseTurnStore(supabase: SupabaseClient): TurnStore {
 
     async priorActions(conversationId) {
       const [convo, calls] = await Promise.all([
-        supabase.from("conversations").select("identified_customer_id").eq("conversation_id", conversationId).maybeSingle(),
+        supabase.from("conversations").select("identified_customer_id, customers(company_name)").eq("conversation_id", conversationId).maybeSingle(),
         supabase
           .from("tool_calls")
           .select("tool_name, turn_index, result_summary")
           .eq("conversation_id", conversationId)
           .eq("status", "success")
-          .in("tool_name", ["create_support_ticket", "create_escalation"])
+          .in("tool_name", ["create_support_ticket", "create_escalation", "lookup_customer", "lookup_transaction", "lookup_payout"])
           .order("created_at"),
       ]);
       check(convo.error, "priorActions");
       check(calls.error, "priorActions");
       const seen = new Set<string>();
-      const actions: PriorActions = { identifiedCustomer: convo.data?.identified_customer_id ?? null, tickets: [], escalations: [] };
+      const company = (convo.data?.customers as { company_name?: string } | null)?.company_name ?? null;
+      const actions: PriorActions = {
+        identifiedCustomer: convo.data?.identified_customer_id ?? null, identifiedCompany: company, lookupsFound: 0, tickets: [], escalations: [],
+      };
       for (const c of calls.data ?? []) {
         const summary = (c.result_summary ?? {}) as Record<string, unknown>;
+        if (c.tool_name.startsWith("lookup_")) {
+          if (summary.found === true) actions.lookupsFound!++;
+          continue;
+        }
         const id = String(summary.ticket_id ?? summary.escalation_id ?? "");
         if (!id || seen.has(id)) continue;
         seen.add(id);

@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { verifyAdmin } from "@/lib/dal";
 import { nowMs } from "@/lib/time";
-import { dateTime, timeAgo } from "@/lib/format";
+import { customerLabel, dateTime, timeAgo, type CustomerName } from "@/lib/format";
 import { OUTCOME_LABEL } from "@/lib/labels";
 import { adminDb } from "@/lib/supabase";
 
@@ -16,7 +16,7 @@ export default async function ConversationsPage({ searchParams }: { searchParams
 
   let query = adminDb()
     .from("conversations")
-    .select("conversation_id, channel, caller_id, started_at, ended_at, final_status, summary, identified_customer_id")
+    .select("conversation_id, channel, caller_id, started_at, ended_at, final_status, summary, identified_customer_id, customers(company_name, contact_name)")
     .gte("started_at", since)
     .order("started_at", { ascending: false })
     .limit(PAGE);
@@ -52,7 +52,7 @@ export default async function ConversationsPage({ searchParams }: { searchParams
             <Link href={`/admin/conversations/${encodeURIComponent(c.conversation_id)}`} className="block p-4 hover:bg-background">
               <div className="flex flex-wrap items-baseline justify-between gap-2">
                 <p className="text-[15px] font-medium">
-                  {c.identified_customer_id ? `Verified caller (${c.identified_customer_id})` : "Caller not verified"}
+                  {c.identified_customer_id ? `Signed in as ${customerLabel(c.identified_customer_id, c.customers as unknown as CustomerName)}` : "Caller not signed in"}
                   {c.channel !== "web" && <span className="ml-2 rounded bg-background px-1.5 py-0.5 text-[12px] font-normal text-muted">test</span>}
                 </p>
                 <p className="text-[13px] text-muted" title={dateTime(c.started_at)}>

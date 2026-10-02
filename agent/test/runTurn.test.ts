@@ -201,6 +201,32 @@ describe("runTurn", () => {
     expect(store.events.map((e) => e.type)).toContain("ungrounded_answer");
   });
 
+  it("an untagged reply after a successful lookup is an answer, even when it ends with a question", async () => {
+    const { deps, store } = setup([
+      { type: "tool_result", tool: "mcp__relaypay__lookup_payout", isError: false, text: JSON.stringify({ found: true, status: "processing" }) },
+      { type: "text", text: "That payout is still processing. Would you like to know anything else about it?" },
+      result,
+    ]);
+    await collect(runTurn(deps, req("Check payout PAY-7001.")));
+    expect(store.turns.get("call-1:0")?.result?.answerType).toBe("answer");
+    expect(store.events.map((e) => e.type)).not.toContain("clarification_requested");
+  });
+
+  it("a follow-up about a record looked up earlier in the call isn't flagged as ungrounded", async () => {
+    const noMatch: RetrievalResult = { chunks: [], matched: false, method: "vector", topScore: 0.29 };
+    const { deps, store } = setup([{ type: "text", text: "No, that's an estimate, not a promise. [[type:answer;confidence:high]]" }, result], noMatch);
+    store.prior = { identifiedCustomer: "CUS-1001", tickets: [], escalations: [], lookupsFound: 1 };
+    await collect(runTurn(deps, req("Can you guarantee it will arrive on August 19th?")));
+    expect(store.events.map((e) => e.type)).not.toContain("ungrounded_answer");
+  });
+
+  it("tells the model the signed-in customer's company", async () => {
+    const { deps, store, prompts } = setup([{ type: "text", text: "Yes. [[type:social;confidence:high]]" }, result]);
+    store.prior = { identifiedCustomer: "CUS-1001", identifiedCompany: "LagosLedger", tickets: [], escalations: [] };
+    await collect(runTurn(deps, req("Do you know who I am?")));
+    expect(prompts[0]).toContain("signed in as customer CUS-1001 (LagosLedger)");
+  });
+
   it("blocks internal notes from a tool result, and logs the block without the text", async () => {
     const { deps, store } = setup([
       { type: "text", text: "Let me check that. " },

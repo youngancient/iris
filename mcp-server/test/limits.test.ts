@@ -22,23 +22,30 @@ describe("identity lock", () => {
 });
 
 describe("lookups without signing in", () => {
-  it("are capped at 5 per call; the 6th returns not found", async () => {
+  it("never return a record, however many are tried, so references can't be guessed", async () => {
     const db = seededDb();
     const { call } = await connect(db);
-    for (let i = 0; i < 5; i++) expect((await call("lookup_transaction", { transaction_id: "TXN-9001" })).data.found).toBe(true);
-    expect((await call("lookup_transaction", { transaction_id: "TXN-9001" })).data.found).toBe(false);
+    for (let i = 0; i < 6; i++) expect((await call("lookup_transaction", { transaction_id: "TXN-9001" })).data.found).toBe(false);
     expect((await call("lookup_payout", { payout_id: "PAY-7001" })).data.found).toBe(false);
-    expect(types(db)).toContain("lookup_rate_limited");
+    expect((await call("lookup_customer", { company_name: "LagosLedger" })).data.found).toBe(false);
   });
 
   it("don't apply to a signed-in owner", async () => {
     const { call } = await connect(seededDb(), "conv-1", "CUS-1001");
     for (let i = 0; i < 7; i++) expect((await call("lookup_transaction", { transaction_id: "TXN-9001" })).data.found).toBe(true);
   });
+});
 
-  it("not-found references don't use up the allowance", async () => {
-    const { call } = await connect(seededDb());
-    for (let i = 0; i < 10; i++) await call("lookup_transaction", { transaction_id: `TXN-${1000 + i}` });
-    expect((await call("lookup_transaction", { transaction_id: "TXN-9001" })).data.found).toBe(true);
+describe("a local stdio operator", () => {
+  it("sees every record, with no call and nobody signed in", async () => {
+    const { call } = await connect(seededDb(), null, undefined, { operator: true });
+    expect((await call("lookup_transaction", { transaction_id: "TXN-9003" })).data).toMatchObject({ found: true, amount: "5300", customer_id: "CUS-1003" });
+    expect((await call("lookup_payout", { payout_id: "PAY-7002" })).data).toMatchObject({ found: true, status: "review required" });
+    expect((await call("lookup_customer", { company_name: "AccraStack" })).data).toMatchObject({ found: true, plan: "Scale" });
+  });
+
+  it("is never the default: without the operator flag, the same lookups find nothing", async () => {
+    const { call } = await connect(seededDb(), null);
+    expect((await call("lookup_transaction", { transaction_id: "TXN-9003" })).data.found).toBe(false);
   });
 });

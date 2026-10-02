@@ -9,6 +9,11 @@ export type ToolContext = {
   db: Db;
   conversationId: string | null;
   turnIndex: number | null;
+  /**
+   * stdio mode only: a local operator (Claude Desktop or Claude Code on a machine that already holds the
+   * database key), not a caller. Sees every record. Never set for HTTP, which is how calls arrive.
+   */
+  operator?: boolean;
   /** Per-tool deadline override (tests); defaults to TOOL_DEADLINE_MS. */
   deadlineMs?: number;
   /** Tells the notifier straight away; never awaited, so it can't slow or fail the tool. */
