@@ -227,6 +227,13 @@ describe("runTurn", () => {
     expect(prompts[0]).toContain("signed in as customer CUS-1001 (LagosLedger)");
   });
 
+  it("asking a signed-out caller to sign in isn't flagged as ungrounded", async () => {
+    const noMatch: RetrievalResult = { chunks: [], matched: false, method: "vector", topScore: 0.2 };
+    const { deps, store } = setup([{ type: "text", text: "I can check that once you sign in at the top of the page. [[type:answer;confidence:high]]" }, result], noMatch);
+    await collect(runTurn(deps, req("Can you check TXN-9001?")));
+    expect(store.events.map((e) => e.type)).not.toContain("ungrounded_answer");
+  });
+
   it("blocks internal notes from a tool result, and logs the block without the text", async () => {
     const { deps, store } = setup([
       { type: "text", text: "Let me check that. " },

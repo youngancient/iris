@@ -32,6 +32,9 @@ function inferAnswerType(spoken: string[], gate: GateClass, grounded: boolean): 
   return last.trim().endsWith("?") ? "clarify" : "answer";
 }
 
+// Iris telling a signed-out caller to sign in: a policy reply, with nothing to ground.
+const ASKS_TO_SIGN_IN = /\bsign(ed)? in\b|\blog(ged)? in\b/i;
+
 // A follow-up about a record already looked up in this call ("can you guarantee it arrives then?").
 const ABOUT_A_RECORD = /\b(payouts?|transactions?|payments?|arriv\w*|status|records?|guarantee\w*|on track|late)\b/i;
 
@@ -410,7 +413,11 @@ export async function* runTurn(deps: TurnDeps, req: TurnRequest): AsyncGenerator
   const aboutEarlierActions =
     (Boolean(done && done.tickets.length + done.escalations.length > 0) && EARLIER_ACTION.test(latest)) ||
     (Boolean(done?.lookupsFound) && ABOUT_A_RECORD.test(latest));
-  if (outcome.answerType === "answer" && !retrieved?.matched && !kbSearched && !toolSucceeded && gate !== "small_talk" && !aboutEarlierActions) {
+  const signInReply = !done?.identifiedCustomer && ASKS_TO_SIGN_IN.test(result.assistantResponse);
+  if (
+    outcome.answerType === "answer" && !retrieved?.matched && !kbSearched && !toolSucceeded && gate !== "small_talk" &&
+    !aboutEarlierActions && !signInReply
+  ) {
     await safely("ungrounded event", () =>
       store.event(conv, "ungrounded_answer", "Answered without matching knowledge or a tool result.", { turn_index: turnIndex }),
     );
