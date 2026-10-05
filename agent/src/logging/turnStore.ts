@@ -30,6 +30,9 @@ export type PriorActions = {
   identifiedCustomer: string | null;
   /** The signed-in customer's company, so Iris can say who the caller is signed in as. */
   identifiedCompany?: string | null;
+  /** The signed-in customer's contact details on file, so Iris doesn't ask for them again. */
+  contactName?: string | null;
+  contactEmail?: string | null;
   /** Lookups earlier in this call that found a record: later answers about them are grounded. */
   lookupsFound?: number;
   tickets: { id: string; turn: number | null }[];
@@ -92,7 +95,7 @@ export function createSupabaseTurnStore(supabase: SupabaseClient): TurnStore {
 
     async priorActions(conversationId) {
       const [convo, calls] = await Promise.all([
-        supabase.from("conversations").select("identified_customer_id, customers(company_name)").eq("conversation_id", conversationId).maybeSingle(),
+        supabase.from("conversations").select("identified_customer_id, customers(company_name, contact_name, contact_email)").eq("conversation_id", conversationId).maybeSingle(),
         supabase
           .from("tool_calls")
           .select("tool_name, turn_index, result_summary")
@@ -104,9 +107,11 @@ export function createSupabaseTurnStore(supabase: SupabaseClient): TurnStore {
       check(convo.error, "priorActions");
       check(calls.error, "priorActions");
       const seen = new Set<string>();
-      const company = (convo.data?.customers as { company_name?: string } | null)?.company_name ?? null;
+      const customer = convo.data?.customers as { company_name?: string; contact_name?: string; contact_email?: string } | null;
+      const company = customer?.company_name ?? null;
       const actions: PriorActions = {
-        identifiedCustomer: convo.data?.identified_customer_id ?? null, identifiedCompany: company, lookupsFound: 0, tickets: [], escalations: [],
+        identifiedCustomer: convo.data?.identified_customer_id ?? null, identifiedCompany: company,
+        contactName: customer?.contact_name || null, contactEmail: customer?.contact_email || null, lookupsFound: 0, tickets: [], escalations: [],
       };
       for (const c of calls.data ?? []) {
         const summary = (c.result_summary ?? {}) as Record<string, unknown>;

@@ -227,6 +227,20 @@ describe("runTurn", () => {
     expect(prompts[0]).toContain("signed in as customer CUS-1001 (LagosLedger)");
   });
 
+  it("gives the model the signed-in customer's contact details, so it doesn't ask for them", async () => {
+    const { deps, store, prompts } = setup([{ type: "text", text: "Sure. [[type:escalate;confidence:high]]" }, result]);
+    store.prior = { identifiedCustomer: "CUS-1001", contactName: "Ada Obi", contactEmail: "ada@example.com", tickets: [], escalations: [] };
+    await collect(runTurn(deps, req("I want to speak to a human.")));
+    expect(prompts[0]).toContain("Contact details on their account: name Ada Obi, email ada@example.com");
+  });
+
+  it("never gives contact details for a caller who isn't signed in", async () => {
+    const { deps, store, prompts } = setup([{ type: "text", text: "Sure. [[type:escalate;confidence:high]]" }, result]);
+    store.prior = { identifiedCustomer: null, contactName: "Ada Obi", contactEmail: "ada@example.com", tickets: [], escalations: [] };
+    await collect(runTurn(deps, req("I want to speak to a human.")));
+    expect(prompts[0]).not.toContain("ada@example.com");
+  });
+
   it("asking a signed-out caller to sign in isn't flagged as ungrounded", async () => {
     const noMatch: RetrievalResult = { chunks: [], matched: false, method: "vector", topScore: 0.2 };
     const { deps, store } = setup([{ type: "text", text: "I can check that once you sign in at the top of the page. [[type:answer;confidence:high]]" }, result], noMatch);
