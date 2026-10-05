@@ -96,6 +96,8 @@ export function CallPanel({ signedIn, available: availableAtLoad }: { signedIn: 
   const [available, setAvailable] = useState(availableAtLoad);
   // The first attempt failed and the page is trying once more.
   const [retrying, setRetrying] = useState(false);
+  // A typed message for Iris: emails, references and names are easier to type than to spell out loud.
+  const [draft, setDraft] = useState("");
 
   const setStatus = (s: Status) => {
     statusRef.current = s;
@@ -303,6 +305,17 @@ export function CallPanel({ signedIn, available: availableAtLoad }: { signedIn: 
     await vapiRef.current?.stop();
   }
 
+  /** Sends typed text into the live call as the caller's turn; Iris answers out loud as usual. */
+  function sendText(e: React.FormEvent) {
+    e.preventDefault();
+    const text = draft.trim();
+    if (!text || status !== "live" || !vapiRef.current) return;
+    vapiRef.current.send({ type: "add-message", message: { role: "user", content: text }, triggerResponseEnabled: true });
+    // Typed turns don't come back as transcript events, so the page adds them itself.
+    setLines((prev) => [...prev, { role: "caller", text }]);
+    setDraft("");
+  }
+
   function toggleMute() {
     if (!vapiRef.current) return;
     const next = !muted;
@@ -427,6 +440,29 @@ export function CallPanel({ signedIn, available: availableAtLoad }: { signedIn: 
           ))}
           {partial && <TranscriptLine line={partial} pending />}
         </ol>
+        <form onSubmit={sendText} className="flex gap-2 border-t border-border px-4 py-3">
+          <label htmlFor="typed-message" className="sr-only">
+            Type a message to Iris
+          </label>
+          <input
+            id="typed-message"
+            type="text"
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            disabled={status !== "live"}
+            maxLength={500}
+            autoComplete="off"
+            placeholder={status === "live" ? "Type an email, reference or message" : "You can type here during the call"}
+            className="h-10 min-w-0 flex-1 rounded-md border border-border bg-background px-3 text-[15px] placeholder:text-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 disabled:opacity-60"
+          />
+          <button
+            type="submit"
+            disabled={status !== "live" || !draft.trim()}
+            className="h-10 rounded-md bg-primary px-4 text-[14px] font-medium text-white hover:bg-primary-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 disabled:opacity-60"
+          >
+            Send
+          </button>
+        </form>
       </section>
     </div>
   );
