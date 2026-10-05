@@ -11,7 +11,7 @@ import { getMaintenance } from "@/lib/settings";
 const configured = Number(process.env.CALL_TOKENS_PER_HOUR);
 const LIMIT_PER_HOUR = Number.isInteger(configured) && configured >= 1 && configured <= 100 ? configured : 5;
 
-const UNAVAILABLE = "Iris is unavailable right now. You can still reach support from your RelayPay dashboard.";
+const UNAVAILABLE = "Iris is unavailable right now. You can still email support@relaypay.com.";
 
 const json = (status: number, body: unknown) =>
   new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json", "cache-control": "no-store" } });

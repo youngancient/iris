@@ -78,6 +78,8 @@ function attemptTracer(attempt: number) {
     console.info(`[call] attempt ${attempt} +${Math.round(performance.now() - began)}ms: ${stage}`, detail ?? "");
 }
 
+const SUPPORT_EMAIL = "support@relaypay.com";
+
 const clock = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
 
 export function CallPanel({ signedIn, available: availableAtLoad }: { signedIn: boolean; available: boolean }) {
@@ -381,7 +383,15 @@ export function CallPanel({ signedIn, available: availableAtLoad }: { signedIn: 
           {inCall
             ? clock(seconds)
             : !available
-              ? "You can still reach support from your RelayPay dashboard."
+              ? (
+                  <>
+                    You can still email{" "}
+                    <a href={`mailto:${SUPPORT_EMAIL}`} className="font-medium text-primary underline underline-offset-2">
+                      {SUPPORT_EMAIL}
+                    </a>
+                    .
+                  </>
+                )
               : status === "idle" && configured
                 ? "Press the button to start a voice call"
                 : ""}

@@ -1,4 +1,5 @@
 import type { TurnResult, TurnStore } from "../logging/turnStore.js";
+import { SUPPORT_EMAIL_SPOKEN } from "./support.js";
 import {
   classifyInput,
   type GateClass,
@@ -40,14 +41,14 @@ const ABOUT_A_RECORD = /\b(payouts?|transactions?|payments?|arriv\w*|status|reco
 
 export const HOLDING_REPLY = "One moment, I'm still working on that.";
 export const FAILURE_REPLY =
-  "I'm having trouble right now. Please try again in a few minutes, or contact support from your RelayPay dashboard.";
+  `I'm having trouble right now. Please try again in a few minutes, or email ${SUPPORT_EMAIL_SPOKEN}.`;
 export const LOOKUP_ACK = "Let me check that for you.";
 export const STALL_REPLY = "Sorry, just a moment.";
 // Vapi hangs up when the assistant says this (endCallPhrases in vapi/assistant.json).
 export const END_CALL_PHRASE = "This call will now end.";
 // Stopped from the dashboard: said once, then the call ends.
-export const MAINTENANCE_REPLY = `Support is temporarily unavailable. Please use your RelayPay dashboard. ${END_CALL_PHRASE}`;
-export const COST_CAP_REPLY = `I've reached the limit for this call. Please contact support from your RelayPay dashboard. ${END_CALL_PHRASE}`;
+export const MAINTENANCE_REPLY = `Support is temporarily unavailable. Please email ${SUPPORT_EMAIL_SPOKEN}. ${END_CALL_PHRASE}`;
+export const COST_CAP_REPLY = `I've reached the limit for this call. Please email ${SUPPORT_EMAIL_SPOKEN}. ${END_CALL_PHRASE}`;
 
 // No model activity after 8s: say a holding line and keep waiting (occasionally the
 // SDK is slow to start; giving up there would fail a turn that was about to succeed).

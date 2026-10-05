@@ -32,7 +32,7 @@ export function KillSwitch({ on }: { on: boolean }) {
           <h2 className="text-[16px] font-semibold">{turnOn ? "Stop Iris?" : "Turn Iris back on?"}</h2>
           <p className="mt-2 text-[14px] leading-6 text-muted">
             {turnOn
-              ? "Iris will stop answering on all calls, including calls in progress, within about 10 seconds. Callers will hear: “Support is temporarily unavailable. Please use your RelayPay dashboard.”"
+              ? "Iris will stop answering on all calls, including calls in progress, within about 10 seconds. Callers will hear: “Support is temporarily unavailable. Please email support at relaypay dot com.”"
               : "Iris will start answering calls again within about 10 seconds. Only do this once whatever made you stop her has been fixed."}
           </p>
           <input type="hidden" name="turnOn" value={String(turnOn)} />

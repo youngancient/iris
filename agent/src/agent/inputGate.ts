@@ -1,10 +1,12 @@
+import { SUPPORT_EMAIL_SPOKEN } from "./support.js";
+
 // Input gate (design §2 step 3a): runs in code before any model or retrieval work.
 
 export type GateClass = "unintelligible" | "small_talk" | "normal";
 
 export const UNINTELLIGIBLE_REPLY = "Sorry, I didn't catch that. Could you say it again?";
 export const UNINTELLIGIBLE_LIMIT_REPLY =
-  "I'm having trouble hearing you. You can try again, or reach support from your RelayPay dashboard.";
+  `I'm having trouble hearing you. You can type your message in the box below the conversation, or email ${SUPPORT_EMAIL_SPOKEN}.`;
 export const UNINTELLIGIBLE_LIMIT = 3;
 
 const SMALL_TALK = new Set([
