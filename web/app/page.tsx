@@ -54,7 +54,7 @@ export default async function Home() {
             <h2 className="font-medium text-foreground">Before you call</h2>
             <p className="mt-1">
               To check your account, a payment or a payout, sign in first. For a specific payment, have its reference
-              ready, for example TXN-9001.
+              ready, for example TXN-1001.
             </p>
           </div>
           <div>
